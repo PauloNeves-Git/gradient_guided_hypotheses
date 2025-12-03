@@ -34,12 +34,16 @@ class Imputer():
                             "Deep Regressor": DeepRegressor(num_epochs = 100, lr= 0.001, rand_state = self.rand_state),
                             "Soft Impute": SoftImpute(),
                             "Matrix Factorization": MatrixFactorization(max_iters=100),
-                            "Hyperimpute": HyperimputeWrapper()
+                            "Hyperimpute": HyperimputeWrapper(),
                             #"Midas": "Midas" #midas was used to generate results in manuscript
-                            
+
                             #("Nuclear Norm. Minimization", NuclearNormMinimization()),
-                            #("BiScaler", BiScaler()),                     
+                            #("BiScaler", BiScaler()),
         }
+        try:
+            self.imputers["TabPFN"] = TabPFNImputer(rand_state=self.rand_state)
+        except ImportError:
+            warnings.warn("TabPFN not installed; skipping TabPFN imputation benchmark.")
         self.results_dict = {}
         
     def test_all_imputers(self, DO, AM, INSPECT, batch_size, hidden_size, num_epochs, results_path): 
@@ -227,3 +231,64 @@ class HyperimputeWrapper():
     def fit_transform(self, X):
         imputed = self.plugin.fit_transform(X.copy())
         return imputed.values
+
+
+class TabPFNImputer():
+    """Imputation wrapper around TabPFN models.
+
+    The TabPFN library primarily targets classification; if a regression model
+    is available it will be used, otherwise the wrapper falls back to training a
+    classifier on the observed target values and using those predictions to fill
+    the missing column.
+    """
+
+    def __init__(self, rand_state: int):
+        self.rand_state = rand_state
+        self.device = "cpu"
+
+        try:
+            from tabpfn import TabPFNRegressor
+
+            self.regressor_cls = TabPFNRegressor
+        except ImportError:
+            self.regressor_cls = None
+
+        from tabpfn import TabPFNClassifier
+
+        self.classifier_cls = TabPFNClassifier
+
+    def fit_transform(self, matrix: np.ndarray) -> np.ndarray:
+        mask = np.isnan(matrix)
+
+        # if no missing values, return the matrix untouched
+        if not mask.any():
+            return matrix
+
+        column = np.argwhere(np.sum(mask, axis=0) > 0)[0, 0]
+
+        X = np.delete(matrix, column, axis=1)
+        y = matrix[:, column]
+
+        known_mask = ~mask[:, column]
+        X_train = X[known_mask]
+        y_train = y[known_mask]
+        X_missing = X[mask[:, column]]
+
+        # Prefer regression when available and labels are continuous
+        is_discrete = np.array_equal(y_train, y_train.astype(int)) and len(np.unique(y_train)) <= 50
+
+        if self.regressor_cls is not None and not is_discrete:
+            model = self.regressor_cls(device=self.device, seed=self.rand_state)
+            model.fit(X_train, y_train)
+            imputed_values = model.predict(X_missing)
+        else:
+            # Train a classifier over the known labels and map predictions back
+            unique_labels, encoded_labels = np.unique(y_train, return_inverse=True)
+            model = self.classifier_cls(device=self.device, seed=self.rand_state)
+            model.fit(X_train, encoded_labels)
+            imputed_values = unique_labels[model.predict(X_missing)]
+
+        matrix_imputed = matrix.copy()
+        matrix_imputed[mask[:, column].reshape(mask[:, column].shape[0]), column] = imputed_values.reshape(imputed_values.shape[0])
+
+        return matrix_imputed
