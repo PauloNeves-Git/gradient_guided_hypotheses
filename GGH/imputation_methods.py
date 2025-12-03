@@ -4,12 +4,12 @@ import torch
 
 from sklearn.experimental import enable_iterative_imputer
 from sklearn.impute import IterativeImputer, KNNImputer
+from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
 from fancyimpute import NuclearNormMinimization, SoftImpute, BiScaler, MatrixFactorization
 
 import sys
 import sklearn.neighbors._base
 sys.modules['sklearn.neighbors.base'] = sklearn.neighbors._base
-from missingpy import MissForest
 import MIDASpy as md
 from hyperimpute.plugins.imputers import Imputers
 
@@ -30,7 +30,7 @@ class Imputer():
         self.imputers = {
                             "Iterative MICE Imputer": IterativeImputer(), #max_iter=30, initial_strategy="most_frequent"
                             "KNN Imputer": KNNImputer(n_neighbors=3),
-                            "Miss Forest": MissForest(),
+                            "Miss Forest": MissForestImputer(rand_state=self.rand_state),
                             "Deep Regressor": DeepRegressor(num_epochs = 100, lr= 0.001, rand_state = self.rand_state),
                             "Soft Impute": SoftImpute(),
                             "Matrix Factorization": MatrixFactorization(max_iters=100),
@@ -173,6 +173,44 @@ class DeepRegressor():
 
     def fit_transform(self, matrix):
         return self.impute_matrix(matrix)
+
+
+class MissForestImputer:
+    """Random forest-based imputer to replace the missingpy dependency."""
+
+    def __init__(self, rand_state: int):
+        self.rand_state = rand_state
+
+    def fit_transform(self, matrix: np.ndarray) -> np.ndarray:
+        mask = np.isnan(matrix)
+
+        if not mask.any():
+            return matrix
+
+        column = np.argwhere(np.sum(mask, axis=0) > 0)[0, 0]
+
+        X = np.delete(matrix, column, axis=1)
+        y = matrix[:, column]
+
+        known_mask = ~mask[:, column]
+        X_train = X[known_mask]
+        y_train = y[known_mask]
+        X_missing = X[mask[:, column]]
+
+        is_discrete = np.array_equal(y_train, y_train.astype(int)) and len(np.unique(y_train)) <= 50
+
+        if is_discrete:
+            model = RandomForestClassifier(random_state=self.rand_state, n_estimators=200)
+        else:
+            model = RandomForestRegressor(random_state=self.rand_state, n_estimators=200)
+
+        model.fit(X_train, y_train)
+        imputed_values = model.predict(X_missing)
+
+        matrix_imputed = matrix.copy()
+        matrix_imputed[mask[:, column], column] = imputed_values.reshape(-1)
+
+        return matrix_imputed
     
 def imput_w_midas(DO, df_train_imp, rand_state):
 
