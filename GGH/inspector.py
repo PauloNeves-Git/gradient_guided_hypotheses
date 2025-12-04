@@ -362,7 +362,12 @@ class Inspector():
             mean_squared_errors = []
             mean_absolute_errors = []
             explained_variance_scores = []
-            if directory.endswith("final_analysis") or directory.endswith(f"final_analysis_{best_imput}"):
+            dir_tail = directory.split("/")[-1]
+            is_final_analysis = dir_tail == "final_analysis"
+            is_best_imputer = best_imput and dir_tail == f"final_analysis_{best_imput}"
+            is_imputer_run = dir_tail.startswith("final_analysis_") and (not best_imput)
+
+            if is_final_analysis or is_best_imputer or is_imputer_run:
                 weights_files = glob.glob(os.path.join(directory, "*.pt"))
                 #model_files = glob.glob(os.path.join(directory, "*.pth"))  
                 if weights_files:
