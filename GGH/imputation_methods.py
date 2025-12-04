@@ -1,6 +1,8 @@
 import pandas as pd
 import numpy as np
 import torch
+import warnings
+from typing import Optional, Type
 
 from sklearn.experimental import enable_iterative_imputer
 from sklearn.impute import IterativeImputer, KNNImputer
@@ -15,10 +17,6 @@ from hyperimpute.plugins.imputers import Imputers
 
 from .models import initialize_model
 from .train_val_loop import TrainValidationManager
-
-import warnings
-
-        
 
 class Imputer():
     def __init__(self, DO):
@@ -273,22 +271,20 @@ class HyperimputeWrapper():
 class TabPFNImputer():
     """Imputation wrapper around TabPFN models.
 
-    The TabPFN library primarily targets classification; if a regression model
-    is available it will be used, otherwise the wrapper falls back to training a
-    classifier on the observed target values and using those predictions to fill
+    The TabPFN library primarily targets classification; the wrapper trains a
+    classifier on the observed target values and uses those predictions to fill
     the missing column.
     """
 
-    def __init__(self, rand_state: int):
+    def __init__(
+        self,
+        rand_state: int,
+        device: Optional[str] = None,
+        ensemble_size: int = 32,
+    ):
         self.rand_state = rand_state
-        self.device = "gpu"# "cpu"
-
-        try:
-            from tabpfn import TabPFNRegressor
-
-            self.regressor_cls = TabPFNRegressor
-        except ImportError:
-            self.regressor_cls = None
+        self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
+        self.ensemble_size = ensemble_size
 
         from tabpfn import TabPFNClassifier
 
@@ -311,19 +307,17 @@ class TabPFNImputer():
         y_train = y[known_mask]
         X_missing = X[mask[:, column]]
 
-        # Prefer regression when available and labels are continuous
-        is_discrete = np.array_equal(y_train, y_train.astype(int)) and len(np.unique(y_train)) <= 50
+        model_kwargs = dict(
+            device=self.device,
+            seed=self.rand_state,
+            N_ensemble_configurations=self.ensemble_size,
+        )
 
-        if self.regressor_cls is not None and not is_discrete:
-            model = self.regressor_cls(device=self.device, seed=self.rand_state)
-            model.fit(X_train, y_train)
-            imputed_values = model.predict(X_missing)
-        else:
-            # Train a classifier over the known labels and map predictions back
-            unique_labels, encoded_labels = np.unique(y_train, return_inverse=True)
-            model = self.classifier_cls(device=self.device, seed=self.rand_state)
-            model.fit(X_train, encoded_labels)
-            imputed_values = unique_labels[model.predict(X_missing)]
+        # Train a classifier over the known labels and map predictions back
+        unique_labels, encoded_labels = np.unique(y_train, return_inverse=True)
+        model = self.classifier_cls(**model_kwargs)
+        model.fit(X_train, encoded_labels)
+        imputed_values = unique_labels[model.predict(X_missing)]
 
         matrix_imputed = matrix.copy()
         matrix_imputed[mask[:, column].reshape(mask[:, column].shape[0]), column] = imputed_values.reshape(imputed_values.shape[0])
