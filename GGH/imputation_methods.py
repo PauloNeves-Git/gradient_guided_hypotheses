@@ -36,7 +36,6 @@ class Imputer():
                             "Matrix Factorization": MatrixFactorization(max_iters=100),
                             "Hyperimpute": HyperimputeWrapper(),
                             #"Midas": "Midas" #midas was used to generate results in manuscript
-
                             #("Nuclear Norm. Minimization", NuclearNormMinimization()),
                             #("BiScaler", BiScaler()),
         }
@@ -282,7 +281,7 @@ class TabPFNImputer():
 
     def __init__(self, rand_state: int):
         self.rand_state = rand_state
-        self.device = "cpu"
+        self.device = "gpu"# "cpu"
 
         try:
             from tabpfn import TabPFNRegressor
