@@ -15,16 +15,17 @@ from sklearn.svm import SVC
 from .data_ops import remove_binary_columns
 
 class AlgoModulators():
-    def __init__(self, data_operator, lr = 0.001, dropout = 0.05, nu = 0.1, normalize_grads_contx = False, use_context = True, eps_value = "-", min_samples_ratio = "-"):
+    def __init__(self, data_operator, lr = 0.001, dropout = 0.05, nu = 0.1, normalize_grads_contx = False, use_context = True, eps_value = "-", min_samples_ratio = "-",
+                 freqperc_cutoff = 0.33, save_results = False):
         self.epoch_loss_in_contxt = 4
         self.sel_freq_crit_start_after = 4
         self.partial_freq_per_epoch = 2
-        self.freqperc_cutoff = 0.33
+        self.freqperc_cutoff = freqperc_cutoff
         self.bi_class_sel = False
         self.gradwcontext = use_context  #True if IPv3
         self.cluster_all_classes = False
         self.has_ohe = False
-        self.save_results = False
+        self.save_results = save_results
         self.no_selection_epochs = 0
         self.rmv_avg_grad_signal = True
         self.layer = -2
@@ -61,7 +62,7 @@ import torch.nn as nn
 
 def compute_individual_grads(model, individual_losses, device):
     # Move model and losses to GPU if available
-    if device == "gpu":
+    if device == "cuda":
         individual_losses = [loss.to(device) for loss in individual_losses]
     
     # Create a thread pool with as many worker threads
@@ -72,6 +73,12 @@ def compute_individual_grads(model, individual_losses, device):
     
     individual_grads = [future.result() for future in individual_grads]
                 
+    return individual_grads
+
+def compute_individual_grads_nothread(model, individual_losses, device):
+    individual_grads = []
+    for loss in individual_losses:
+        individual_grads.append(grad(loss, model.parameters(), retain_graph=True))
     return individual_grads
 
 import random

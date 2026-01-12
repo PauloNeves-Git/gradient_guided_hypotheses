@@ -1,0 +1,40 @@
+{
+   "number_epochs": 12,
+   "info_used": "use hypothesis",
+   "perc_full_data": 0.25,
+   "n_epochs_no_selection": 0,
+   "Frequency % cutoff": 0.25,
+   "hidden_size": 32,
+   "random_state": 3,
+   "train_errors": [
+      0.05249527469277382,
+      0.04235035926103592,
+      0.04038163647055626,
+      0.03870409354567528,
+      0.037597816437482834,
+      0.03615439310669899,
+      0.03493558242917061,
+      0.03386455774307251,
+      0.034806203097105026,
+      0.03306405618786812,
+      0.03290002793073654,
+      0.03369984030723572
+   ],
+   "valid_errors": [
+      0.030283451080322266,
+      0.019283384084701538,
+      0.018805885687470436
+   ],
+   "val_epochs": [
+      0,
+      6,
+      11
+   ],
+   "input_data_path": "../data/wine/red_wine.csv",
+   "gradwcontext": true,
+   "Encompassing Param": 0.1,
+   "Normalize Grads & Contx": false,
+   "cluster_all_classes": false,
+   "imputation method": "",
+   "model_dropout": 0.05
+}

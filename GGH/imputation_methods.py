@@ -12,7 +12,7 @@ from fancyimpute import NuclearNormMinimization, SoftImpute, BiScaler, MatrixFac
 import sys
 import sklearn.neighbors._base
 sys.modules['sklearn.neighbors.base'] = sklearn.neighbors._base
-import MIDASpy as md
+#import MIDASpy as md
 from hyperimpute.plugins.imputers import Imputers
 
 from .models import initialize_model

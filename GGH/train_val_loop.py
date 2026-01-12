@@ -107,7 +107,14 @@ class TrainValidationManager():
 
 
                 elif self.use_info == "use hypothesis" or self.use_info == "known info noisy simulation":
-
+                    
+                    #print(model.type)
+                    ##print("####")
+                    #print(predictions)
+                    #print("####")
+                    #print(labels)
+                    #print("-----------------")
+                    
                     overall_loss, individual_losses = loss_fn_custom(predictions, labels)
                     if DO.device == "cuda":
                         ind_loss_array = individual_losses.detach().cpu().numpy()
@@ -117,7 +124,8 @@ class TrainValidationManager():
                     if self.use_info != "known info noisy simulation":
                         partial_full_preds = model(DO.partial_input_tensor)
                         partial_incorr_full_preds = model(DO.inc_partial_input_tensor)     
-                        DO.append2hyp_df(batch_i, ind_loss_array, "loss")                       
+                        if AM.save_results:
+                            DO.append2hyp_df(batch_i, ind_loss_array, "loss")                       
 
                         
                     if self.select_gradients == True:
@@ -125,7 +133,8 @@ class TrainValidationManager():
                         if self.use_info == "known info noisy simulation":
 
                             grads = compute_individual_grads(model, individual_losses, DO.device)
-                            DO.append2hyp_df(batch_i, grads, "gradients", layer = AM.layer)
+                            if AM.save_results:
+                                DO.append2hyp_df(batch_i, grads, "gradients", layer = AM.layer)
                             DO.append2hyp_df(batch_i, ind_loss_array, "loss") 
                             # select gradients by avoiding noisy datapoints
                             sel_grads, sel_global_ids = gradient_selection_avoid_noise(AM, epoch, grads, self.batch_size, batch_i, inputs,
@@ -168,7 +177,8 @@ class TrainValidationManager():
                             if epoch >= AM.no_selection_epochs:
 
                                 #hypothesis_grads   inc_partial_full_grads
-
+                                
+                                                               
                                 sel_grads, selected_global_ids = gradient_selection(DO, AM, epoch, hypothesis_grads, DO.latest_partial_grads, 
                                                                                 self.batch_size, DO.num_hyp_comb, batch_i, 
                                                                                 inputs, DO.partial_input_tensor, labels, predictions,

@@ -3,7 +3,7 @@ import datetime
 import os
 import pandas as pd
 import numpy as np
-from sklearn.metrics import r2_score, mean_squared_error, accuracy_score, f1_score, explained_variance_score, mean_absolute_error, confusion_matrix
+from sklearn.metrics import r2_score, mean_squared_error, accuracy_score, roc_auc_score, f1_score, explained_variance_score, mean_absolute_error, confusion_matrix
 import glob
 import seaborn as sns
 import matplotlib.pyplot as plt
@@ -96,6 +96,33 @@ def model_predict(TVM, model, tensors):
     val_pred = model(tensors)
     val_pred = val_pred.detach().numpy()
     return val_pred
+
+
+def reset_pt_files(root_folder):
+    """
+    Recursively searches the given folder and deletes all .pt files it finds.
+    """
+    deleted_count = 0
+    if not os.path.isdir(root_folder):
+        raise ValueError(f"{root_folder} is not a valid directory.")
+
+    for dirpath, dirnames, filenames in os.walk(root_folder):
+        for filename in filenames:
+            if filename.lower().endswith(".pt"):
+                file_path = os.path.join(dirpath, filename)
+                try:
+                    os.remove(file_path)
+                    #print(f"Deleted: {file_path}")
+                    deleted_count += 1
+                except Exception as e:
+                    print(f"Failed to delete {file_path}: {e}")
+    
+    print(f"Total .pt files deleted: {deleted_count}")
+    return deleted_count
+
+def round_to_binary(arr):
+    return np.where(arr >= 0.5, 1, 0)
+
         
 class Inspector():
     def __init__(self, save_path, hidden_size):
@@ -186,9 +213,17 @@ class Inspector():
         val_tensors = self._get_val_tensors(DO, TVM, data)
         val_pred = model_predict(TVM, model, val_tensors)
         if data == "validation" or data == "Validation":
-            return accuracy_score(DO.df_val[DO.target_vars].values, val_pred)
+            return accuracy_score(DO.df_val[DO.target_vars].values, round_to_binary(val_pred))
         elif data == "test" or data == "Test":
-            return accuracy_score(DO.df_test[DO.target_vars].values, val_pred)
+            return accuracy_score(DO.df_test[DO.target_vars].values, round_to_binary(val_pred))
+        
+    def calculate_val_auc(self, DO, TVM, model, data = "validation"):
+        val_tensors = self._get_val_tensors(DO, TVM, data)
+        val_pred = model_predict(TVM, model, val_tensors)
+        if data == "validation" or data == "Validation":
+            return roc_auc_score(DO.df_val[DO.target_vars].values, val_pred)
+        elif data == "test" or data == "Test":
+            return roc_auc_score(DO.df_test[DO.target_vars].values, val_pred)
     
     def _get_val_tensors(self, DO, TVM, data = "validation"):
         if data == "validation" or data == "Validation":
@@ -353,24 +388,32 @@ class Inspector():
         return df
 
     
-    def create_test_comparison_table(self, data_path, inpt_vars, target_vars, miss_vars, hypothesis, partial_perc, batch_size, best_imput = "", use_info = "", noise_profile = {}):
+    def create_test_comparison_table(self, data_path, inpt_vars, target_vars, miss_vars, hypothesis, partial_perc, batch_size, best_imput = "",
+                                     use_info = "", noise_profile = {}, task_type = "regression"):
         subdirectories = [x[0] for x in os.walk(self.save_path)]
         all_test_results = {}
         all_test_results_notavg = {}
         for directory in subdirectories:
+            #print("1")
             r2_scores = []
             mean_squared_errors = []
             mean_absolute_errors = []
             explained_variance_scores = []
+            
+            accuracy_scores = []
+            roc_auc_scores  = []
+            
             dir_tail = directory.split("/")[-1]
             is_final_analysis = dir_tail == "final_analysis"
             is_best_imputer = best_imput and dir_tail == f"final_analysis_{best_imput}"
             is_imputer_run = dir_tail.startswith("final_analysis_") and (not best_imput)
 
             if is_final_analysis or is_best_imputer or is_imputer_run:
+                #print("2")
                 weights_files = glob.glob(os.path.join(directory, "*.pt"))
                 #model_files = glob.glob(os.path.join(directory, "*.pth"))  
                 if weights_files:
+                    #print("3")
                     for weights_f in weights_files: #, model_f zip( , model_files)
                         #if weights_f.split(".")[0] != model_f.split(".")[0]:
                         #    raise ValueError("Weights and model don't match.")
@@ -386,7 +429,7 @@ class Inspector():
                             or ((use_info != "known info noisy simulation") and (use_info != "full info noisy")):
                             #print(use_info)
                             #print(weights_f)
-                            #print("#2")
+                            #print("4")
                             model = load_model(DO, weights_f, batch_size)  
                             model.eval()
                             if directory.split("/")[-2] in ["full info", "partial info", "use imputation", "use hypothesis", "known info noisy simulation", "full info noisy"]:
@@ -394,12 +437,20 @@ class Inspector():
                             if directory.split("/")[-2] == "use known only":
                                 test_predictions = model(DO.known_test_input_tensor)
                             #print(r2_score(test_predictions.detach().numpy(), DO.df_test[DO.target_vars].values))
-                            r2_scores.append(r2_score(DO.df_test[DO.target_vars].values, test_predictions.detach().numpy()))
-                            mean_squared_errors.append(mean_squared_error(test_predictions.detach().numpy(), DO.df_test[DO.target_vars].values))
-                            mean_absolute_errors.append(mean_absolute_error(test_predictions.detach().numpy(), DO.df_test[DO.target_vars].values))
-                            explained_variance_scores.append(explained_variance_score(DO.df_test[DO.target_vars].values, test_predictions.detach().numpy()))
-
-                all_test_results[directory.split("/")[-2]] = {#"avg_cap_r2_score":np.mean([0 if r < 0 else r for r in r2_scores]),
+                            if task_type == "regression":
+                                r2_scores.append(r2_score(DO.df_test[DO.target_vars].values, test_predictions.detach().numpy()))
+                                mean_squared_errors.append(mean_squared_error(test_predictions.detach().numpy(), DO.df_test[DO.target_vars].values))
+                                mean_absolute_errors.append(mean_absolute_error(test_predictions.detach().numpy(), DO.df_test[DO.target_vars].values))
+                                explained_variance_scores.append(explained_variance_score(DO.df_test[DO.target_vars].values, test_predictions.detach().numpy()))
+                            elif task_type == "classification":
+                                #print("5")
+                                accuracy_scores.append(accuracy_score(DO.df_test[DO.target_vars].values, round_to_binary(test_predictions.detach().numpy())))
+                                roc_auc_scores.append(roc_auc_score(DO.df_test[DO.target_vars].values, test_predictions.detach().numpy()))
+                            else:
+                                print("task_type has to be regression or classification")
+                                
+                if task_type == "regression":
+                    all_test_results[directory.split("/")[-2]] = {#"avg_cap_r2_score":np.mean([0 if r < 0 else r for r in r2_scores]),
                                                               "avg_r2_score":np.mean(r2_scores),
                                                               "std_r2_score":np.std(r2_scores),
                                                               "avg_mse":np.mean(mean_squared_errors),
@@ -408,11 +459,24 @@ class Inspector():
                                                               "std_mae":np.std(mean_absolute_errors),
                                                               "explained_variance_scores":np.mean(explained_variance_scores)}
                 
-                all_test_results_notavg[directory.split("/")[-2]] = {#"avg_cap_r2_score":[0 if r < 0 else r for r in r2_scores],
+                    all_test_results_notavg[directory.split("/")[-2]] = {#"avg_cap_r2_score":[0 if r < 0 else r for r in r2_scores],
                                                                       "avg_r2_score":r2_scores,
                                                                       "avg_mse":mean_squared_errors,
                                                                       "avg_mae":mean_absolute_errors,
                                                                       "explained_variance":explained_variance_scores}
+                elif task_type == "classification":
+                    all_test_results[directory.split("/")[-2]] = {
+                                                              "avg_acc_score":np.mean(accuracy_scores),
+                                                              "std_acc_score":np.std(accuracy_scores),
+                                                              "avg_auc":np.mean(roc_auc_scores),
+                                                              "std_auc":np.std(roc_auc_scores)}
+
+                    all_test_results_notavg[directory.split("/")[-2]] = {
+                                                                      "avg_acc_score":accuracy_scores,
+                                                                      "avg_auc":roc_auc_scores}
+                    
+        
+        #return all_test_results, all_test_results_notavg
         
         df = format2table(all_test_results)
         df_notavg = format2table(all_test_results_notavg)
