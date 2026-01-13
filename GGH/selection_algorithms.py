@@ -116,6 +116,58 @@ class BCEIndividualLosses(nn.BCELoss):
         overall_loss = individual_losses.mean()
         
         return overall_loss, individual_losses
+
+class AUCIndividualLosses(nn.Module):
+    """
+    Differentiable AUC approximation loss for binary classification.
+    Uses pairwise ranking loss (1 - AUC approximation).
+    """
+    def __init__(self, gamma=0.5):
+        super(AUCIndividualLosses, self).__init__()
+        self.gamma = gamma  # Controls the smoothness of the approximation
+        
+    def forward(self, predictions, labels):
+        # Apply sigmoid to get probabilities
+        predictions = torch.sigmoid(predictions).squeeze()
+        labels = labels.squeeze()
+        
+        # Separate positive and negative samples
+        pos_mask = labels == 1
+        neg_mask = labels == 0
+        
+        pos_preds = predictions[pos_mask]
+        neg_preds = predictions[neg_mask]
+        
+        # If we don't have both classes, fall back to BCE
+        if len(pos_preds) == 0 or len(neg_preds) == 0:
+            individual_losses = - (labels * torch.log(predictions + 1e-8) + (1 - labels) * torch.log(1 - predictions + 1e-8))
+            overall_loss = individual_losses.mean()
+            return overall_loss, individual_losses.unsqueeze(1)
+        
+        # Compute pairwise differences: for each positive sample, compare with all negative samples
+        # We want pos_pred > neg_pred, so we maximize (pos_pred - neg_pred)
+        # Loss = mean(sigmoid(-(pos_pred - neg_pred) / gamma))
+        pos_expanded = pos_preds.unsqueeze(1)  # Shape: (n_pos, 1)
+        neg_expanded = neg_preds.unsqueeze(0)  # Shape: (1, n_neg)
+        
+        # Pairwise ranking loss: penalize when negative predictions >= positive predictions
+        pairwise_diff = pos_expanded - neg_expanded  # Shape: (n_pos, n_neg)
+        pairwise_loss = torch.sigmoid(-pairwise_diff / self.gamma)  # Want this to be small
+        
+        overall_loss = pairwise_loss.mean()
+        
+        # Compute individual losses by averaging over pairwise comparisons
+        # For positive samples: average loss when compared to all negatives
+        pos_individual_losses = pairwise_loss.mean(dim=1)  # Shape: (n_pos,)
+        # For negative samples: average loss when compared to all positives
+        neg_individual_losses = pairwise_loss.mean(dim=0)  # Shape: (n_neg,)
+        
+        # Reconstruct individual losses in original order
+        individual_losses = torch.zeros_like(labels)
+        individual_losses[pos_mask] = pos_individual_losses
+        individual_losses[neg_mask] = neg_individual_losses
+        
+        return overall_loss, individual_losses.unsqueeze(1)
     
 class CrossEntropyIndividualLosses(nn.CrossEntropyLoss):
     def forward(self, predictions, labels):

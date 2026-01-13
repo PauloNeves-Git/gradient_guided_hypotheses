@@ -3,7 +3,7 @@ from tqdm import tqdm
 import torch
 import torch.nn as nn
 from .selection_algorithms import gradient_selection, compute_individual_grads, gradient_random_selection, \
-                                 MSEIndividualLosses, BCEIndividualLosses, CrossEntropyIndividualLosses, \
+                                 MSEIndividualLosses, BCEIndividualLosses, AUCIndividualLosses, CrossEntropyIndividualLosses, \
                                  gradients_mean, gradient_selection_avoid_noise
 from .custom_optimizer import CustomAdam
 from .data_ops import duplicate_elements
@@ -72,8 +72,9 @@ class TrainValidationManager():
             self.loss_fn = nn.MSELoss()
             loss_fn_custom = MSEIndividualLosses()
         elif model.type == "binary-class":
-            self.loss_fn = nn.BCELoss()
-            loss_fn_custom = BCEIndividualLosses()
+            # Automatically use AUC loss for binary classification
+            self.loss_fn = AUCIndividualLosses()
+            loss_fn_custom = AUCIndividualLosses()
         elif model.type == "multi-class":
             self.loss_fn = nn.CrossEntropyLoss()
             loss_fn_custom = CrossEntropyIndividualLosses()
