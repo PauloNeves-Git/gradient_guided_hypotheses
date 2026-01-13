@@ -221,7 +221,7 @@ class TrainValidationManager():
                 elif self.use_info in ["use known only"]:
                     valid_error = self._validate_model(DO.known_val_input_tensor, DO.val_outcomes_tensor, model)
                 #valid_error = np.mean(valid_error)
-                if valid_error < self.best_valid_error:
+                if valid_error < self.best_valid_error - 1e-12:
                     self.best_valid_error = valid_error
                     torch.save(model.state_dict(), self.weights_save_path)
                     self.best_checkpoint = epoch

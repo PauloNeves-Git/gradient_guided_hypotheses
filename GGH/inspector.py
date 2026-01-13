@@ -402,6 +402,8 @@ class Inspector():
             
             accuracy_scores = []
             roc_auc_scores  = []
+            rand_states = []
+
             
             dir_tail = directory.split("/")[-1]
             is_final_analysis = dir_tail == "final_analysis"
@@ -411,6 +413,8 @@ class Inspector():
             if is_final_analysis or is_best_imputer or is_imputer_run:
                 #print("2")
                 weights_files = glob.glob(os.path.join(directory, "*.pt"))
+                weights_files.sort(key=lambda p: int(os.path.basename(p).split(".")[0]))
+
                 #model_files = glob.glob(os.path.join(directory, "*.pth"))  
                 if weights_files:
                     #print("3")
@@ -442,10 +446,12 @@ class Inspector():
                                 mean_squared_errors.append(mean_squared_error(test_predictions.detach().numpy(), DO.df_test[DO.target_vars].values))
                                 mean_absolute_errors.append(mean_absolute_error(test_predictions.detach().numpy(), DO.df_test[DO.target_vars].values))
                                 explained_variance_scores.append(explained_variance_score(DO.df_test[DO.target_vars].values, test_predictions.detach().numpy()))
+                                rand_states.append(rand_state)
                             elif task_type == "classification":
                                 #print("5")
                                 accuracy_scores.append(accuracy_score(DO.df_test[DO.target_vars].values, round_to_binary(test_predictions.detach().numpy())))
                                 roc_auc_scores.append(roc_auc_score(DO.df_test[DO.target_vars].values, test_predictions.detach().numpy()))
+                                rand_states.append(rand_state)
                             else:
                                 print("task_type has to be regression or classification")
                                 
@@ -460,6 +466,7 @@ class Inspector():
                                                               "explained_variance_scores":np.mean(explained_variance_scores)}
                 
                     all_test_results_notavg[directory.split("/")[-2]] = {#"avg_cap_r2_score":[0 if r < 0 else r for r in r2_scores],
+                                                                      "rand_states": rand_states,                                          
                                                                       "avg_r2_score":r2_scores,
                                                                       "avg_mse":mean_squared_errors,
                                                                       "avg_mae":mean_absolute_errors,
@@ -472,6 +479,7 @@ class Inspector():
                                                               "std_auc":np.std(roc_auc_scores)}
 
                     all_test_results_notavg[directory.split("/")[-2]] = {
+                                                                      "rand_states": rand_states,
                                                                       "avg_acc_score":accuracy_scores,
                                                                       "avg_auc":roc_auc_scores}
                     
@@ -636,22 +644,26 @@ def selection_histograms(DO, TVM, num_epochs, rand_state, partial_perc, bins=20,
         rect = Rectangle((left, 0), np.diff(bins)[0], height, fill=None, alpha=0.7, edgecolor='black', linewidth=1)
         plt.gca().add_patch(rect)
     
-    if kde:
-        # Calculate KDE on a dense x-axis spanning the range of the bins
-        x_d = np.linspace(0, max(bins), 1000) #
-        kde1 = gaussian_kde(data1, bw_method=0.15) #
-        kde2 = gaussian_kde(data2, bw_method=0.15) #'silverman'
-        
-        # Compute the KDE values on the dense x-axis
-        kde1_vals = kde1(x_d)
-        kde2_vals = kde2(x_d)
-        
-        # Scale the KDE to match the histogram's height scale
-        kde1_scale = max(data1_percent) / max(kde1_vals)
-        kde2_scale = max(data2_percent) / max(kde2_vals)
-        
-        plt.plot(x_d, kde1_vals * kde1_scale, color='green', alpha = 0.7)#, linestyle='--')
-        plt.plot(x_d, kde2_vals * kde2_scale, color='red', alpha = 0.7)#, linestyle='--')
+    try:
+        if kde:
+            # Calculate KDE on a dense x-axis spanning the range of the bins
+            x_d = np.linspace(0, max(bins), 1000) #
+            kde1 = gaussian_kde(data1, bw_method=0.15) #
+            kde2 = gaussian_kde(data2, bw_method=0.15) #'silverman'
+
+            # Compute the KDE values on the dense x-axis
+            kde1_vals = kde1(x_d)
+            kde2_vals = kde2(x_d)
+
+            # Scale the KDE to match the histogram's height scale
+            kde1_scale = max(data1_percent) / max(kde1_vals)
+            kde2_scale = max(data2_percent) / max(kde2_vals)
+
+            plt.plot(x_d, kde1_vals * kde1_scale, color='green', alpha = 0.7)#, linestyle='--')
+            plt.plot(x_d, kde2_vals * kde2_scale, color='red', alpha = 0.7)#, linestyle='--')
+            
+    except:
+        pass
 
     # Set the tick direction outwards and add grid lines
     plt.gca().tick_params(direction='out')
@@ -1130,3 +1142,31 @@ def extract_elements(df, column_name, epoch = -1):
     vertical_array = np.array(elements).reshape(-1, 1)
 
     return vertical_array
+
+from pathlib import Path
+
+def clean_final_analysis(results_path, use_info):
+    """
+    Delete *.pt and *.json (and optionally figures) from final_analysis folders.
+    - results_path: root results directory (e.g. "../saved_results/Donated Blood")
+    - use_info: if provided (e.g. "use hypothesis"), only clean that subfolder
+    - final_dir_name: folder name (default "final_analysis"). If you use "final_analysis_500", pass that.
+    - delete_figures: optionally deletes PNGs under a 'figures' subfolder too
+    - dry_run: if True, prints what would be deleted without deleting
+    """
+    root = Path(results_path)
+    candidates = [root / use_info / "final_analysis"]
+
+    if not candidates:
+        print(f"No existing final_analysis files found for {root}")
+    else:
+        for d in candidates:
+            patterns = ["*.pt", "*.json"]
+            files = []
+            for pat in patterns:
+                files.extend(d.glob(pat))
+
+            files = sorted(set(files))
+            print(f"Deleted {len(files)} files in: {d}")
+            for f in files:
+                    f.unlink()
