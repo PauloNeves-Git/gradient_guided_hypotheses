@@ -244,6 +244,9 @@ class TrainValidationManager():
         validation_loss = self.loss_fn(validation_predictions, validation_labels)
         model.train()
 
+        # Handle both tuple (custom losses) and tensor (standard PyTorch losses)
+        if isinstance(validation_loss, tuple):
+            return validation_loss[0].item()
         return validation_loss.item()
     
     def _test_model(self, test_inputs, test_labels, model):
@@ -253,6 +256,9 @@ class TrainValidationManager():
         test_loss = self.loss_fn(test_predictions, test_labels)
         model.train()
 
+        # Handle both tuple (custom losses) and tensor (standard PyTorch losses)
+        if isinstance(test_loss, tuple):
+            return test_loss[0].item()
         return test_loss.item()  
     
 def range_with_tqdm(num_epochs, use_tqdm):
