@@ -1,0 +1,31 @@
+{
+   "number_epochs": 5,
+   "info_used": "use known only",
+   "perc_full_data": 0.1,
+   "n_epochs_no_selection": 0,
+   "Frequency % cutoff": 0.25,
+   "hidden_size": 32,
+   "random_state": 15,
+   "train_errors": [
+      0.7051624655723572,
+      0.6981242895126343,
+      0.6908188462257385,
+      0.6862277388572693,
+      0.6800680756568909
+   ],
+   "valid_errors": [
+      0.701206624507904,
+      0.6645469069480896
+   ],
+   "val_epochs": [
+      0,
+      4
+   ],
+   "input_data_path": "../data/donated_blood/donated_blood_subsampled_balance.csv",
+   "gradwcontext": true,
+   "Encompassing Param": 0.1,
+   "Normalize Grads & Contx": false,
+   "cluster_all_classes": false,
+   "imputation method": "",
+   "model_dropout": 0.05
+}

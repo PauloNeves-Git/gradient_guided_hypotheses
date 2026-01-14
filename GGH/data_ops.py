@@ -13,7 +13,8 @@ from torch.utils.data import TensorDataset, DataLoader
 class DataOperator():
     def __init__(self, path, inpt_vars, target_vars, miss_vars, hypothesis, partial_perc = 0.2, 
                  rand_state = 42, hyp_class_thresh = [], device = "cpu", use_mode = "validation",
-                 process_data = True, verbose = False, pre_defined_train = False, use_case = "hypothesis"):  
+                 process_data = True, verbose = False, pre_defined_train = False, use_case = "hypothesis",
+                 data_split={"train":0.72,"val":0.88}):  
               
         self.path = path
         self.inpt_vars = deepcopy(inpt_vars)
@@ -37,9 +38,9 @@ class DataOperator():
             if type(pre_defined_train) == pd.DataFrame:
                 self.df_train = pre_defined_train
             else:
-                self.df_train = self.df.iloc[:int(len(self.df)*0.72)]
-            self.df_val = self.df.iloc[int(len(self.df)*0.72):int(len(self.df)*0.88)]
-            self.df_test = self.df.iloc[int(len(self.df)*0.88):]
+                self.df_train = self.df.iloc[:int(len(self.df)*data_split["train"])]
+            self.df_val = self.df.iloc[int(len(self.df)*data_split["train"]):int(len(self.df)*data_split["val"])]
+            self.df_test = self.df.iloc[int(len(self.df)*data_split["val"]):]
         elif use_mode == "fill_missing":
             #self.df_train = self.df.iloc[:]
             #these are placeholders in the case of fill_missing, in that scenario no val/test is expected.
