@@ -2,6 +2,7 @@ import numpy as np
 from tqdm import tqdm
 import torch
 import torch.nn as nn
+from sklearn.metrics import roc_auc_score
 from .selection_algorithms import gradient_selection, compute_individual_grads, gradient_random_selection, \
                                  MSEIndividualLosses, BCEIndividualLosses, AUCIndividualLosses, CrossEntropyIndividualLosses, \
                                  gradients_mean, gradient_selection_avoid_noise
@@ -11,11 +12,12 @@ from .models import initialize_model, load_model
 import os
 
 class TrainValidationManager():
-    def __init__(self, use_info, num_epochs, dataloader, batch_size, rand_state, save_path, select_gradients = False, end_epochs_noise_detection = 0, best_valid_error = np.inf, imput_method = "", final_analysis = False):
+    def __init__(self, use_info, num_epochs, dataloader, batch_size, rand_state, save_path, select_gradients = False, end_epochs_noise_detection = 0, best_valid_error = np.inf, imput_method = "", final_analysis = False, use_auc_loss = False):
         self.use_info = use_info
         self.save_path = save_path
         self.rand_state = rand_state
         self.final_analysis = final_analysis
+        self.use_auc_loss = use_auc_loss
         if not self.final_analysis:
             self.weights_save_path = f"{self.save_path}/{self.use_info}/{self.rand_state}.pt"
             self.model_save_path = f"{self.save_path}/{self.use_info}/{self.rand_state}.pth"
@@ -39,6 +41,7 @@ class TrainValidationManager():
         self.valid_errors_epoch = []
         self.val_epochs = []
         self.best_valid_error = best_valid_error
+        self.best_valid_auc = 0.0  # Track best AUC for binary classification
         self.best_checkpoint = 0
         self.sel_grads_num_logs = []
         self.all_partial_ind_losses = {}
@@ -72,9 +75,12 @@ class TrainValidationManager():
             self.loss_fn = nn.MSELoss()
             loss_fn_custom = MSEIndividualLosses()
         elif model.type == "binary-class":
-            # Automatically use AUC loss for binary classification
-            self.loss_fn = AUCIndividualLosses()
-            loss_fn_custom = AUCIndividualLosses()
+            if self.use_auc_loss:
+                self.loss_fn = AUCIndividualLosses()
+                loss_fn_custom = AUCIndividualLosses()
+            else:
+                self.loss_fn = nn.BCELoss()
+                loss_fn_custom = BCEIndividualLosses()
         elif model.type == "multi-class":
             self.loss_fn = nn.CrossEntropyLoss()
             loss_fn_custom = CrossEntropyIndividualLosses()
@@ -220,14 +226,31 @@ class TrainValidationManager():
                     valid_error = self._validate_model(DO.full_val_input_tensor, DO.val_outcomes_tensor, model)
                 elif self.use_info in ["use known only"]:
                     valid_error = self._validate_model(DO.known_val_input_tensor, DO.val_outcomes_tensor, model)
-                #valid_error = np.mean(valid_error)
-                if valid_error < self.best_valid_error - 1e-12:
-                    self.best_valid_error = valid_error
-                    torch.save(model.state_dict(), self.weights_save_path)
-                    self.best_checkpoint = epoch
-                    #if self.use_info in ["known info noisy simulation"]:
-                    #    self.best_eps = eps
-                    #    self.min_samples_ratio = min_samples_ratio
+                
+                # For binary classification, save based on best AUC instead of best loss
+                if model.type == "binary-class":
+                    # Compute validation AUC
+                    model.eval()
+                    if self.use_info in ["full info", "partial info", "use hypothesis", "use imputation", "known info noisy simulation", "full info noisy"]:
+                        val_preds = model(DO.full_val_input_tensor)
+                    elif self.use_info in ["use known only"]:
+                        val_preds = model(DO.known_val_input_tensor)
+                    model.train()
+                    
+                    val_preds = torch.sigmoid(val_preds).detach().numpy()
+                    val_labels = DO.val_outcomes_tensor.detach().numpy()
+                    valid_auc = roc_auc_score(val_labels, val_preds)
+                    
+                    if valid_auc > self.best_valid_auc:
+                        self.best_valid_auc = valid_auc
+                        torch.save(model.state_dict(), self.weights_save_path)
+                        self.best_checkpoint = epoch
+                else:
+                    # For regression and multi-class, save based on best loss
+                    if valid_error < self.best_valid_error - 1e-12:
+                        self.best_valid_error = valid_error
+                        torch.save(model.state_dict(), self.weights_save_path)
+                        self.best_checkpoint = epoch
 
 
                 self.valid_errors_epoch.append(np.mean(valid_error))
