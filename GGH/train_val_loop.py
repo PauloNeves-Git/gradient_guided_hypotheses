@@ -186,26 +186,37 @@ class TrainValidationManager():
                                 #hypothesis_grads   inc_partial_full_grads
                                 
                                                                
-                                sel_grads, selected_global_ids = gradient_selection(DO, AM, epoch, hypothesis_grads, DO.latest_partial_grads, 
+                                result = gradient_selection(DO, AM, epoch, hypothesis_grads, DO.latest_partial_grads, 
                                                                                 self.batch_size, DO.num_hyp_comb, batch_i, 
                                                                                 inputs, DO.partial_input_tensor, labels, predictions,
                                                                                 DO.partial_full_outcomes, partial_full_preds, 
                                                                                 individual_losses, partial_individual_losses, 
                                                                                 DO.inc_partial_input_tensor, partial_incorr_full_preds,
                                                                                 inc_partial_individual_losses, DO.latest_inc_partial_grads, self.rand_state)
+                                
+                                # Unpack result - may include confidence weights
+                                if len(result) == 3:
+                                    sel_grads, selected_global_ids, confidence_weights = result
+                                else:
+                                    sel_grads, selected_global_ids = result
+                                    confidence_weights = None
 
                             else:
                                 #Baseline Random Gradient selection from each group
                                 sel_grads = gradient_random_selection(hypothesis_grads, DO.num_hyp_comb)
+                                confidence_weights = None
 
                         if self.use_info != "known info noisy simulation" and AM.partial_freq_per_epoch != 0 and batch_i % int(len(DO.df_train_hypothesis)/self.batch_size/AM.partial_freq_per_epoch) == 0:
                             sel_grads = sel_grads+DO.latest_partial_grads
+                            # When adding partial grads, extend confidence weights with 1.0 (full confidence for known correct data)
+                            if confidence_weights is not None:
+                                confidence_weights = np.concatenate([confidence_weights, np.ones(len(DO.latest_partial_grads))])
 
                         # Update the weights
                         if len(sel_grads) == 0:
                             print("No gradients were selected, training will cease.")
                             break
-                        overall_sel_grads = gradients_mean(sel_grads)
+                        overall_sel_grads = gradients_mean(sel_grads, confidence_weights)
                         custom_optimizer.step(overall_sel_grads)
                         self.sel_grads_num_logs.append(len(sel_grads))
                     else:

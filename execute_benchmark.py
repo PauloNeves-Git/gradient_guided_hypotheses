@@ -23,9 +23,9 @@ def load_config(file_path):
     with open(file_path, 'r') as file:
         return json.load(file)
 
-def full_experiment(use_info, DO, INSPECT, batch_size, hidden_size, output_size, num_epochs, rand_state, results_path, dropout = 0.05, lr = 0.004, nu = 0.1, final_analysis = False, use_auc_loss = False):
+def full_experiment(use_info, DO, INSPECT, batch_size, hidden_size, output_size, num_epochs, rand_state, results_path, dropout = 0.05, lr = 0.004, nu = 0.1, final_analysis = False, use_auc_loss = False, use_confidence_weighting = False):
        
-    AM = AlgoModulators(DO, lr = lr, nu = nu)
+    AM = AlgoModulators(DO, lr = lr, nu = nu, use_confidence_weighting = use_confidence_weighting)
     dataloader = DO.prep_dataloader(use_info, batch_size)
 
     model = initialize_model(DO, dataloader, hidden_size, rand_state, dropout = dropout) 
@@ -38,13 +38,13 @@ def full_experiment(use_info, DO, INSPECT, batch_size, hidden_size, output_size,
     return DO, TVM, model
 
 def multi_experiments(total_runs, use_info, num_epochs, data_path, inpt_vars, target_vars, miss_vars, hypothesis, partial_perc,
-                      INSPECT, batch_size, hidden_size, output_size, results_path, hyperparameters, final_analysis = True, use_auc_loss = False):
+                      INSPECT, batch_size, hidden_size, output_size, results_path, hyperparameters, final_analysis = True, use_auc_loss = False, use_confidence_weighting = False):
     
     progress_bar = tqdm(total=total_runs)
     for r_state in range(2000): #
         DO = DataOperator(data_path, inpt_vars, target_vars, miss_vars, hypothesis, partial_perc, r_state, device = "cpu")
         if not DO.lack_partial_coverage:
-            full_experiment(use_info, DO, INSPECT, batch_size, hidden_size, output_size, num_epochs, r_state, results_path, hyperparameters["dropout"]["value"], hyperparameters["lr"]["value"], hyperparameters["nu"]["value"], final_analysis, use_auc_loss)
+            full_experiment(use_info, DO, INSPECT, batch_size, hidden_size, output_size, num_epochs, r_state, results_path, hyperparameters["dropout"]["value"], hyperparameters["lr"]["value"], hyperparameters["nu"]["value"], final_analysis, use_auc_loss, use_confidence_weighting)
             progress_bar.update(1)
         if progress_bar.n == total_runs:
             break       

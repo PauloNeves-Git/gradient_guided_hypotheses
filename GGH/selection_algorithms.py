@@ -16,7 +16,7 @@ from .data_ops import remove_binary_columns
 
 class AlgoModulators():
     def __init__(self, data_operator, lr = 0.001, dropout = 0.05, nu = 0.1, normalize_grads_contx = False, use_context = True, eps_value = "-", min_samples_ratio = "-",
-                 freqperc_cutoff = 0.33, save_results = False):
+                 freqperc_cutoff = 0.33, save_results = False, use_confidence_weighting = False):
         self.epoch_loss_in_contxt = 4
         self.sel_freq_crit_start_after = 4
         self.partial_freq_per_epoch = 2
@@ -40,6 +40,7 @@ class AlgoModulators():
         self.dropout = dropout
         self.nu = nu
         self.normalize_grads_contx = normalize_grads_contx
+        self.use_confidence_weighting = use_confidence_weighting  # Enable confidence-weighted gradient selection
         #torch.manual_seed(42)
         
         self.eps_value = eps_value
@@ -224,6 +225,9 @@ def gradient_selection(DO, AM, epoch, hypothesis_grads, partial_full_grads, batc
     all_partial_hyp = [[] for i in range(hyp_per_sample)]
     all_inc_partial_hyp = [[] for i in range(hyp_per_sample)]
     
+    # Track confidence weights if enabled
+    selected_confidence_weights = []
+    
     labels = labels.clone().detach().requires_grad_(False)
     partial_full_outcomes = partial_full_outcomes.clone().detach().requires_grad_(False)
     #predictions = predictions.clone().detach().requires_grad_(False) 
@@ -360,6 +364,15 @@ def gradient_selection(DO, AM, epoch, hypothesis_grads, partial_full_grads, batc
             #grad_model= EllipticEnvelope(contamination=0.2).fit(class_1_vectors)
             
             unknown_labels = list(grad_model.predict(unknown_vectors))
+            
+            # Compute confidence weights if enabled
+            if AM.use_confidence_weighting:
+                decision_scores = grad_model.decision_function(unknown_vectors)
+                # Convert to confidence weights using sigmoid (0 to 1 range)
+                # Positive scores = high confidence inlier, negative = outlier
+                confidence_weights = 1 / (1 + np.exp(-decision_scores))
+            else:
+                confidence_weights = None
             #print(sum(unknown_labels))
             
             #Experiment to select lowest loss cluster
@@ -405,12 +418,15 @@ def gradient_selection(DO, AM, epoch, hypothesis_grads, partial_full_grads, batc
                             if epoch > AM.sel_freq_crit_start_after:
                                 if sum(DO.df_train_hypothesis.sel_hyp_tracker.iloc[global_hyp_id]) >= epoch*AM.freqperc_cutoff:
                                     selected_gradients.append(full_grads)
-
+                                    if confidence_weights is not None:
+                                        selected_confidence_weights.append(confidence_weights[local_id])
                                     DO.df_train_hypothesis.at[global_hyp_id, 'final_sel_hyp'].append(1)
                                 else:
                                     DO.df_train_hypothesis.at[global_hyp_id, 'final_sel_hyp'].append(0)
                             else:
                                 selected_gradients.append(full_grads)
+                                if confidence_weights is not None:
+                                    selected_confidence_weights.append(confidence_weights[local_id])
                                 DO.df_train_hypothesis.at[global_hyp_id, 'final_sel_hyp'].append(1)
                         else:
                             DO.df_train_hypothesis.at[global_hyp_id, 'sel_hyp_tracker'].append(0)
@@ -420,6 +436,8 @@ def gradient_selection(DO, AM, epoch, hypothesis_grads, partial_full_grads, batc
                         DO.df_train_hypothesis.at[global_hyp_id, 'final_sel_hyp'].append(0)
                 else:
                     selected_gradients.append(full_grads)
+                    if confidence_weights is not None:
+                        selected_confidence_weights.append(confidence_weights[local_id])
                     DO.df_train_hypothesis.at[global_hyp_id, 'sel_hyp_tracker'].append(1)
                     DO.df_train_hypothesis.at[global_hyp_id, 'final_sel_hyp'].append(1)                    
             
@@ -430,7 +448,11 @@ def gradient_selection(DO, AM, epoch, hypothesis_grads, partial_full_grads, batc
             #sys.exit()
                     
     #print(hm)
-    return selected_gradients, selected_global_ids
+    # Return confidence weights if available, otherwise None
+    if AM.use_confidence_weighting and len(selected_confidence_weights) > 0:
+        return selected_gradients, selected_global_ids, selected_confidence_weights
+    else:
+        return selected_gradients, selected_global_ids, None
     
 
 def select_low_loss_cluster(unknown_vectors, n_clusters, rand_state):
@@ -486,23 +508,41 @@ def hyp2hyp_binlist(hyp_class, hyp_per_sample):
     hyp_list[hyp_class] = 1
     return hyp_list
             
-def gradients_mean(sel_grads):
+def gradients_mean(sel_grads, confidence_weights=None):
+    """
+    Compute mean of gradients, optionally weighted by confidence scores.
+    
+    Args:
+        sel_grads: List of gradient tuples
+        confidence_weights: Optional numpy array of confidence weights (0-1 range)
+    
+    Returns:
+        Average (or weighted average) gradients
+    """
     # Initialize the average gradients to zero
     average_grads = [torch.zeros_like(grad) for grad in sel_grads[0]]
     
-    # Sum the gradients
-    for grads in sel_grads:
-        for i, grad in enumerate(grads):
-            average_grads[i] += grad
+    if confidence_weights is not None:
+        # Weighted average with confidence scores
+        total_weight = np.sum(confidence_weights)
+        for grads, weight in zip(sel_grads, confidence_weights):
+            for i, grad in enumerate(grads):
+                average_grads[i] += grad * weight
+        
+        # Normalize by total weight
+        for i in range(len(average_grads)):
+            average_grads[i] /= total_weight
+    else:
+        # Standard unweighted average
+        for grads in sel_grads:
+            for i, grad in enumerate(grads):
+                average_grads[i] += grad
+        
+        # Divide by the number of samples
+        num_samples = len(sel_grads)
+        for i, grad in enumerate(average_grads):
+            average_grads[i] /= num_samples
     
-    # Divide by the number of samples
-    num_samples = len(sel_grads)
-    for i, grad in enumerate(average_grads):
-        average_grads[i] /= num_samples
-    
-    #different attempt
-    #stkd_sel_grads = torch.stack(sel_grads, dim=0)
-    #torch.mean(stkd_sel_grads, dim=0)
     return average_grads 
 
 def normalize_and_split(arr1, arr2):
