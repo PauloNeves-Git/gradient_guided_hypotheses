@@ -389,7 +389,7 @@ class Inspector():
 
     
     def create_test_comparison_table(self, data_path, inpt_vars, target_vars, miss_vars, hypothesis, partial_perc, batch_size, best_imput = "",
-                                     use_info = "", noise_profile = {}, task_type = "regression"):
+                                     use_info = "", noise_profile = {}, task_type = "regression", data_split={"train":0.72,"val":0.88}):
         subdirectories = [x[0] for x in os.walk(self.save_path)]
         all_test_results = {}
         all_test_results_notavg = {}
@@ -424,7 +424,7 @@ class Inspector():
                         rand_state = int(weights_f.split("/")[-1].split(".")[0])
                         if use_info not in ["known info noisy simulation", "full info noisy"]:
                             DO = DataOperator(data_path, inpt_vars, target_vars, miss_vars, hypothesis,
-                                              partial_perc, rand_state, device = "cpu")
+                                              partial_perc, rand_state, device = "cpu", data_split = data_split)
                         else:
                             DO = DataOperator(data_path, inpt_vars, target_vars, miss_vars, hypothesis,
                                               partial_perc, rand_state, device = "cpu", use_case = "noise detection")
