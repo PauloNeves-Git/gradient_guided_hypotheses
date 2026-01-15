@@ -39,6 +39,7 @@ class TrainValidationManager():
         self.batch_size = batch_size
         self.train_errors_epoch = []
         self.valid_errors_epoch = []
+        self.valid_auc_history = []
         self.val_epochs = []
         self.best_valid_error = best_valid_error
         self.best_valid_auc = 0.0  # Track best AUC for binary classification
@@ -251,6 +252,8 @@ class TrainValidationManager():
                     val_preds = torch.sigmoid(val_preds).detach().numpy()
                     val_labels = DO.val_outcomes_tensor.detach().numpy()
                     valid_auc = roc_auc_score(val_labels, val_preds)
+                    
+                    self.valid_auc_history.append(valid_auc)
                     
                     if valid_auc > self.best_valid_auc:
                         self.best_valid_auc = valid_auc
