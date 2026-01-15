@@ -23,9 +23,10 @@ def load_config(file_path):
     with open(file_path, 'r') as file:
         return json.load(file)
 
-def full_experiment(use_info, DO, INSPECT, batch_size, hidden_size, output_size, num_epochs, rand_state, results_path, dropout = 0.05, lr = 0.004, nu = 0.1, final_analysis = False, use_auc_loss = False, use_confidence_weighting = False):
+def full_experiment(use_info, DO, INSPECT, batch_size, hidden_size, output_size, num_epochs, rand_state, results_path, dropout = 0.05, lr = 0.004, nu = 0.1, 
+                    normalize_grads_contx = False, use_context = True, final_analysis = False, use_auc_loss = False, use_confidence_weighting = False):
        
-    AM = AlgoModulators(DO, lr = lr, nu = nu, use_confidence_weighting = use_confidence_weighting)
+    AM = AlgoModulators(DO, lr = lr, nu = nu, normalize_grads_contx = normalize_grads_contx, use_context = use_context, freqperc_cutoff = 0.25, use_confidence_weighting = use_confidence_weighting)
     dataloader = DO.prep_dataloader(use_info, batch_size)
 
     model = initialize_model(DO, dataloader, hidden_size, rand_state, dropout = dropout) 

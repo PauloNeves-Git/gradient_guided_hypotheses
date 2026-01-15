@@ -16,7 +16,7 @@ from .data_ops import remove_binary_columns
 
 class AlgoModulators():
     def __init__(self, data_operator, lr = 0.001, dropout = 0.05, nu = 0.1, normalize_grads_contx = False, use_context = True, eps_value = "-", min_samples_ratio = "-",
-                 freqperc_cutoff = 0.33, save_results = False, use_confidence_weighting = False):
+                 freqperc_cutoff = 0.33, save_results = False, use_confidence_weighting = False, use_contrastive_selection = False, contrastive_temperature = 0.1):
         self.epoch_loss_in_contxt = 4
         self.sel_freq_crit_start_after = 4
         self.partial_freq_per_epoch = 2
@@ -41,6 +41,8 @@ class AlgoModulators():
         self.nu = nu
         self.normalize_grads_contx = normalize_grads_contx
         self.use_confidence_weighting = use_confidence_weighting  # Enable confidence-weighted gradient selection
+        self.use_contrastive_selection = use_contrastive_selection  # Enable contrastive gradient selection
+        self.contrastive_temperature = contrastive_temperature  # Temperature for softmax in contrastive selection
         #torch.manual_seed(42)
         
         self.eps_value = eps_value
@@ -96,6 +98,69 @@ def gradient_random_selection(hypothesys_grads, HYPOTHESIS_COMB_LENGHT):
         # Append the selected element to the list of selected elements
         selected_elements.append(selected_element)
     return selected_elements
+
+def contrastive_gradient_scoring(unknown_grads, correct_grads, incorrect_grads=None, temperature=0.1):
+    """
+    Score gradients using contrastive learning approach.
+    Higher scores mean more similar to correct gradients and dissimilar to incorrect ones.
+    
+    Args:
+        unknown_grads: List of gradient vectors to score (numpy arrays)
+        correct_grads: List of known correct gradient vectors (numpy arrays)
+        incorrect_grads: Optional list of known incorrect gradient vectors (numpy arrays)
+        temperature: Temperature parameter for softmax sharpening (lower = sharper)
+    
+    Returns:
+        scores: Array of contrastive scores (higher = more likely correct)
+        discrimination_quality: Scalar indicating how well correct/incorrect separate
+    """
+    import torch.nn.functional as F
+    
+    # Compute mean gradients for reference
+    correct_mean = np.mean(correct_grads, axis=0)
+    
+    if incorrect_grads is not None and len(incorrect_grads) > 0:
+        incorrect_mean = np.mean(incorrect_grads, axis=0)
+        has_incorrect = True
+    else:
+        has_incorrect = False
+    
+    scores = []
+    
+    for grad in unknown_grads:
+        # Cosine similarity to correct reference
+        cos_correct = np.dot(grad, correct_mean) / (
+            np.linalg.norm(grad) * np.linalg.norm(correct_mean) + 1e-8
+        )
+        
+        if has_incorrect:
+            # Cosine similarity to incorrect reference
+            cos_incorrect = np.dot(grad, incorrect_mean) / (
+                np.linalg.norm(grad) * np.linalg.norm(incorrect_mean) + 1e-8
+            )
+            
+            # Contrastive score: close to correct, far from incorrect
+            # Apply temperature scaling for sharper distinctions
+            score = (cos_correct - cos_incorrect) / temperature
+        else:
+            # Only have correct reference
+            score = cos_correct / temperature
+        
+        scores.append(score)
+    
+    scores = np.array(scores)
+    
+    # Compute discrimination quality metric
+    if has_incorrect:
+        # Measure how separated correct and incorrect references are
+        ref_similarity = np.dot(correct_mean, incorrect_mean) / (
+            np.linalg.norm(correct_mean) * np.linalg.norm(incorrect_mean) + 1e-8
+        )
+        discrimination_quality = 1.0 - ref_similarity  # Higher when references are more different
+    else:
+        discrimination_quality = None
+    
+    return scores, discrimination_quality
 
 class MSEIndividualLosses(nn.MSELoss):
     def forward(self, predictions, labels):
@@ -358,21 +423,51 @@ def gradient_selection(DO, AM, epoch, hypothesis_grads, partial_full_grads, batc
             #print(class_1_vectors)
             #unknown_vectors = unknown_vectors * feature_weights
             
-            #increase in nu will make clusters more restrictive move selection distributions to the left
-            grad_model = OneClassSVM(kernel='poly', nu = AM.nu).fit(class_1_vectors) #1/hyp_per_sample
-            #grad_model = IsolationForest(contamination=0.5).fit(class_1_vectors)
-            #grad_model= EllipticEnvelope(contamination=0.2).fit(class_1_vectors)
-            
-            unknown_labels = list(grad_model.predict(unknown_vectors))
-            
-            # Compute confidence weights if enabled
-            if AM.use_confidence_weighting:
-                decision_scores = grad_model.decision_function(unknown_vectors)
-                # Convert to confidence weights using sigmoid (0 to 1 range)
-                # Positive scores = high confidence inlier, negative = outlier
-                confidence_weights = 1 / (1 + np.exp(-decision_scores))
+            # Choose selection method: Contrastive or OneClassSVM
+            if AM.use_contrastive_selection:
+                # Use contrastive gradient selection
+                # Note: We need incorrect samples for full contrastive learning
+                # For now, use only correct reference (semi-supervised contrastive)
+                contrastive_scores, discrimination_quality = contrastive_gradient_scoring(
+                    unknown_vectors, 
+                    class_1_vectors, 
+                    incorrect_grads=None,  # Could be added if available
+                    temperature=AM.contrastive_temperature
+                )
+                
+                # Convert scores to binary labels (top percentage as inliers)
+                # Use adaptive threshold based on score distribution
+                threshold = np.percentile(contrastive_scores, 100 * (1 - AM.nu))
+                unknown_labels = [1 if score >= threshold else -1 for score in contrastive_scores]
+                
+                # Use contrastive scores as confidence weights
+                if AM.use_confidence_weighting:
+                    # Normalize scores to [0, 1] range
+                    min_score = contrastive_scores.min()
+                    max_score = contrastive_scores.max()
+                    confidence_weights = (contrastive_scores - min_score) / (max_score - min_score + 1e-8)
+                else:
+                    confidence_weights = None
+                    
+                if discrimination_quality is not None and epoch % 5 == 0:
+                    print(f"[Contrastive] Epoch {epoch}, Class {class_id}: Discrimination quality = {discrimination_quality:.4f}")
             else:
-                confidence_weights = None
+                # Original OneClassSVM selection
+                #increase in nu will make clusters more restrictive move selection distributions to the left
+                grad_model = OneClassSVM(kernel='poly', nu = AM.nu).fit(class_1_vectors) #1/hyp_per_sample
+                #grad_model = IsolationForest(contamination=0.5).fit(class_1_vectors)
+                #grad_model= EllipticEnvelope(contamination=0.2).fit(class_1_vectors)
+                
+                unknown_labels = list(grad_model.predict(unknown_vectors))
+                
+                # Compute confidence weights if enabled
+                if AM.use_confidence_weighting:
+                    decision_scores = grad_model.decision_function(unknown_vectors)
+                    # Convert to confidence weights using sigmoid (0 to 1 range)
+                    # Positive scores = high confidence inlier, negative = outlier
+                    confidence_weights = 1 / (1 + np.exp(-decision_scores))
+                else:
+                    confidence_weights = None
             #print(sum(unknown_labels))
             
             #Experiment to select lowest loss cluster
