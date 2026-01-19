@@ -1,0 +1,40 @@
+{
+   "number_epochs": 12,
+   "info_used": "use hypothesis",
+   "perc_full_data": 0.1,
+   "n_epochs_no_selection": 0,
+   "Frequency % cutoff": 0.3,
+   "hidden_size": 32,
+   "random_state": 42,
+   "train_errors": [
+      0.044511597603559494,
+      0.040765631943941116,
+      0.03849995136260986,
+      0.03697444498538971,
+      0.034107960760593414,
+      0.030256742611527443,
+      0.026570266112685204,
+      0.023373261094093323,
+      0.021207235753536224,
+      0.018984291702508926,
+      0.018214598298072815,
+      0.016831882297992706
+   ],
+   "valid_errors": [
+      0.07192704826593399,
+      0.03984678536653519,
+      0.026184875518083572
+   ],
+   "val_epochs": [
+      0,
+      6,
+      11
+   ],
+   "input_data_path": "../data/photoredox_yield/photo_redox_merck2021_1649reactions.csv",
+   "gradwcontext": true,
+   "Encompassing Param": 0.1,
+   "Normalize Grads & Contx": false,
+   "cluster_all_classes": false,
+   "imputation method": "",
+   "model_dropout": 0.05
+}
