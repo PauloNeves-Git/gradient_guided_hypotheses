@@ -84,11 +84,11 @@ class TabPFNWrapper(nn.Module):
         self.feature_projection = nn.Linear(input_size, hidden_size)
         
         # Multi-head attention layer for feature interactions
+        # Note: batch_first parameter not supported in PyTorch < 1.9, so we handle reshaping manually
         self.attention = nn.MultiheadAttention(
             embed_dim=hidden_size,
             num_heads=4,
-            dropout=self.dropout_rate if dropout else 0.0,
-            batch_first=True
+            dropout=self.dropout_rate if dropout else 0.0
         )
         
         # Feed-forward network (transformer-style)
@@ -117,12 +117,13 @@ class TabPFNWrapper(nn.Module):
         # Project input features to hidden dimension
         x = self.feature_projection(x)  # [batch, hidden_size]
         
-        # Reshape for attention: [batch, seq_len=1, hidden_size]
-        x_reshaped = x.unsqueeze(1)
+        # Reshape for attention: MultiheadAttention expects [seq_len, batch, embed_dim]
+        x_reshaped = x.unsqueeze(0)  # [1, batch, hidden_size]
         
         # Self-attention with residual connection
         attn_output, _ = self.attention(x_reshaped, x_reshaped, x_reshaped)
-        x = self.norm1(x + attn_output.squeeze(1))
+        # attn_output is [1, batch, hidden_size], squeeze to [batch, hidden_size]
+        x = self.norm1(x + attn_output.squeeze(0))
         
         if hasattr(self, 'dropout') and self.dropout_rate:
             x = self.dropout(x)

@@ -1,5 +1,11 @@
 # Quick Start: Using TabPFN-Style Transformer with GGH
 
+## Requirements
+
+- Python 3.8+
+- PyTorch 1.8.0+ (tested with 1.8.2 and 2.0+)
+- Existing GGH dependencies
+
 ## Installation
 
 The TabPFN package is already installed. No additional setup needed.

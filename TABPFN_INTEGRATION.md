@@ -4,6 +4,8 @@
 
 This integration adds a transformer-based architecture (inspired by TabPFN) to the GGH framework, enabling the use of more sophisticated models that produce more informed gradients for hypothesis selection.
 
+**PyTorch Compatibility:** Works with PyTorch 1.8.0+ (tested with PyTorch 1.8.2 and 2.0+)
+
 ## Motivation
 
 The original hypothesis: **Better models produce more informed gradients, which benefit gradient-guided hypothesis selection more than model performance alone.**
