@@ -151,8 +151,10 @@ class TrainValidationManager():
                             if epoch >= self.num_epochs - self.end_epochs_noise_detection:
                                 sel_grads = grads
                                 if first_load == True:
-
-                                    model = initialize_model(DO, self.dataloader, model.hidden_size, self.rand_state, dropout = AM.dropout)
+                                    # Preserve model type when reloading
+                                    model_type = "tabpfn" if "TabPFN" in model.__class__.__name__ else "mlp"
+                                    model = initialize_model(DO, self.dataloader, model.hidden_size, self.rand_state, 
+                                                           dropout=AM.dropout, model_type=model_type)
                                     model.load_state_dict(torch.load(self.weights_save_path))
                                     custom_optimizer = CustomAdam(model.parameters(), lr= AM.lr) #, weight_decay=0.005
                                     first_load = False

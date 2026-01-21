@@ -132,12 +132,19 @@ class Inspector():
 
     def save_train_val_logs(self, DO, AM, TVM, model, imput_method = "", final_analysis = False, noise_profile = []):
         
+        # Determine model type
+        model_type = "mlp"
+        if hasattr(model, '__class__'):
+            if "TabPFN" in model.__class__.__name__:
+                model_type = "tabpfn"
+        
         results_dict = {"number_epochs": TVM.num_epochs, "info_used": TVM.use_info, "perc_full_data": DO.partial_perc, 
                         "n_epochs_no_selection": AM.no_selection_epochs, "Frequency % cutoff": AM.freqperc_cutoff,
                         "hidden_size": self.hidden_size, "random_state": DO.rand_state,
                         "train_errors": TVM.train_errors_epoch, "valid_errors": TVM.valid_errors_epoch, "val_epochs": TVM.val_epochs,
                         "input_data_path": DO.path, "gradwcontext": AM.gradwcontext, "Encompassing Param": AM.nu, "Normalize Grads & Contx": AM.normalize_grads_contx,
-                        "cluster_all_classes": AM.cluster_all_classes, "imputation method": imput_method, "model_dropout": model.dropout}
+                        "cluster_all_classes": AM.cluster_all_classes, "imputation method": imput_method, "model_dropout": model.dropout if hasattr(model, 'dropout') else model.dropout_rate,
+                        "model_type": model_type}
         
         if noise_profile:
             results_dict["DATA_NOISE_PERC"] = noise_profile["DATA_NOISE_PERC"]

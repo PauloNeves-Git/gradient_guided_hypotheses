@@ -398,8 +398,8 @@ def one_hot_encode(df, columns_to_encode, ohe_weigth = 1.0):
     # Loop through each column to encode
     for column in columns_to_encode:
         # One-hot encode the column using pandas get_dummies function
-        one_hot_encoded = pd.get_dummies(df[column], prefix=column)
-        one_hot_encoded = one_hot_encoded.replace(1, 1*ohe_weigth)
+        one_hot_encoded = pd.get_dummies(df[column], prefix=column, dtype=float)  # Force float dtype
+        one_hot_encoded = one_hot_encoded.replace(1.0, 1.0*ohe_weigth)
         encoded_columns.extend(one_hot_encoded.columns)
         # Add the one-hot encoded columns to the new DataFrame
         df_encoded = pd.concat([df_encoded, one_hot_encoded], axis=1)
