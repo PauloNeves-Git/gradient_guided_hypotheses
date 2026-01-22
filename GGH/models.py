@@ -232,6 +232,10 @@ def load_model(DO, model_path, batch_size):
         with open(json_files[-1]) as f:
             json_file = json.load(f)
 
+        # Override problem_type if it was stored in JSON (to preserve manual overrides during training)
+        if "problem_type" in json_file:
+            DO.problem_type = json_file["problem_type"]
+        
         dataloader = DO.prep_dataloader(json_file["info_used"], batch_size)
         model_type = json_file.get("model_type", "mlp")  # Default to MLP for backward compatibility
         model = initialize_model(DO, dataloader, json_file["hidden_size"], DO.rand_state, 

@@ -1,3 +1,5 @@
+LICENSE.txt
+README.md
 setup.py
 GGH/__init__.py
 GGH/custom_optimizer.py

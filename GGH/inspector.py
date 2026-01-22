@@ -138,13 +138,23 @@ class Inspector():
             if "TabPFN" in model.__class__.__name__:
                 model_type = "tabpfn"
         
+        # Extract dropout rate (handle both MLP and TabPFNWrapper)
+        if hasattr(model, 'dropout_rate'):
+            # TabPFNWrapper stores dropout_rate as float
+            dropout_value = model.dropout_rate
+        elif hasattr(model, 'dropout'):
+            # MLP stores dropout as float or False
+            dropout_value = model.dropout if isinstance(model.dropout, (int, float, bool)) else 0.0
+        else:
+            dropout_value = 0.0
+        
         results_dict = {"number_epochs": TVM.num_epochs, "info_used": TVM.use_info, "perc_full_data": DO.partial_perc, 
                         "n_epochs_no_selection": AM.no_selection_epochs, "Frequency % cutoff": AM.freqperc_cutoff,
                         "hidden_size": self.hidden_size, "random_state": DO.rand_state,
                         "train_errors": TVM.train_errors_epoch, "valid_errors": TVM.valid_errors_epoch, "val_epochs": TVM.val_epochs,
                         "input_data_path": DO.path, "gradwcontext": AM.gradwcontext, "Encompassing Param": AM.nu, "Normalize Grads & Contx": AM.normalize_grads_contx,
-                        "cluster_all_classes": AM.cluster_all_classes, "imputation method": imput_method, "model_dropout": model.dropout if hasattr(model, 'dropout') else model.dropout_rate,
-                        "model_type": model_type}
+                        "cluster_all_classes": AM.cluster_all_classes, "imputation method": imput_method, "model_dropout": dropout_value,
+                        "model_type": model_type, "problem_type": DO.problem_type}
         
         if noise_profile:
             results_dict["DATA_NOISE_PERC"] = noise_profile["DATA_NOISE_PERC"]
@@ -445,13 +455,13 @@ class Inspector():
                             model.eval()
                             if directory.split("/")[-2] in ["full info", "partial info", "use imputation", "use hypothesis", "known info noisy simulation", "full info noisy"]:
                                 test_predictions = model(DO.full_test_input_tensor)
-                            if directory.split("/")[-2] == "use known only":
+                            elif directory.split("/")[-2] == "use known only":
                                 test_predictions = model(DO.known_test_input_tensor)
                             #print(r2_score(test_predictions.detach().numpy(), DO.df_test[DO.target_vars].values))
                             if task_type == "regression":
                                 r2_scores.append(r2_score(DO.df_test[DO.target_vars].values, test_predictions.detach().numpy()))
-                                mean_squared_errors.append(mean_squared_error(test_predictions.detach().numpy(), DO.df_test[DO.target_vars].values))
-                                mean_absolute_errors.append(mean_absolute_error(test_predictions.detach().numpy(), DO.df_test[DO.target_vars].values))
+                                mean_squared_errors.append(mean_squared_error(DO.df_test[DO.target_vars].values, test_predictions.detach().numpy()))
+                                mean_absolute_errors.append(mean_absolute_error(DO.df_test[DO.target_vars].values, test_predictions.detach().numpy()))
                                 explained_variance_scores.append(explained_variance_score(DO.df_test[DO.target_vars].values, test_predictions.detach().numpy()))
                                 rand_states.append(rand_state)
                             elif task_type == "classification":
