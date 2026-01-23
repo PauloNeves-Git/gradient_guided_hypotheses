@@ -131,7 +131,8 @@ class TrainValidationManager():
 
                     if self.use_info != "known info noisy simulation":
                         partial_full_preds = model(DO.partial_input_tensor)
-                        partial_incorr_full_preds = model(DO.inc_partial_input_tensor)     
+                        # Skip forward pass on incorrect partial hypotheses (only needed for visualization)
+                        # partial_incorr_full_preds = model(DO.inc_partial_input_tensor)     
                         if AM.save_results:
                             DO.append2hyp_df(batch_i, ind_loss_array, "loss")                       
 
@@ -165,14 +166,16 @@ class TrainValidationManager():
                             partial_overall_loss, partial_individual_losses = loss_fn_custom(partial_full_preds, DO.partial_full_outcomes)
                             self.all_partial_ind_losses[f"epoch_{epoch}"].append(partial_individual_losses)
 
-                            inc_partial_overall_loss = []
-                            inc_partial_overall_loss, inc_partial_individual_losses = loss_fn_custom(partial_incorr_full_preds, duplicate_elements(DO.partial_full_outcomes, DO.num_hyp_comb-1).view(-1,1))  
+                            # Skip computing incorrect partial hypotheses during training (only needed for visualization)
+                            # inc_partial_overall_loss = []
+                            # inc_partial_overall_loss, inc_partial_individual_losses = loss_fn_custom(partial_incorr_full_preds, duplicate_elements(DO.partial_full_outcomes, DO.num_hyp_comb-1).view(-1,1))  
 
                             #calculate all hypothesis gradients
                             #To optimize speed calculate only the last 2 layers of gradients instead of everything
                             hypothesis_grads = compute_individual_grads(model, individual_losses, DO.device)
                             DO.latest_partial_grads = compute_individual_grads(model, partial_individual_losses, DO.device)
-                            DO.latest_inc_partial_grads = compute_individual_grads(model, inc_partial_individual_losses, DO.device)
+                            # DO.latest_inc_partial_grads = compute_individual_grads(model, inc_partial_individual_losses, DO.device)  # Skip for speed
+                            DO.latest_inc_partial_grads = []  # Empty list for compatibility
 
                             custom_optimizer.zero_grad()
                             overall_loss.backward()
@@ -194,8 +197,8 @@ class TrainValidationManager():
                                                                                 inputs, DO.partial_input_tensor, labels, predictions,
                                                                                 DO.partial_full_outcomes, partial_full_preds, 
                                                                                 individual_losses, partial_individual_losses, 
-                                                                                DO.inc_partial_input_tensor, partial_incorr_full_preds,
-                                                                                inc_partial_individual_losses, DO.latest_inc_partial_grads, self.rand_state)
+                                                                                DO.inc_partial_input_tensor, None,  # Skip incorrect partial preds
+                                                                                None, DO.latest_inc_partial_grads, self.rand_state)  # Skip incorrect partial losses
                                 
                                 # Unpack result - may include confidence weights
                                 if len(result) == 3:
