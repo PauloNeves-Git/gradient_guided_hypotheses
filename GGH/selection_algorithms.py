@@ -16,7 +16,7 @@ from .data_ops import remove_binary_columns
 
 class AlgoModulators():
     def __init__(self, data_operator, lr = 0.001, dropout = 0.05, nu = 0.1, normalize_grads_contx = False, use_context = True, eps_value = "-", min_samples_ratio = "-",
-                 freqperc_cutoff = 0.33, save_results = False, use_confidence_weighting = False):
+                 freqperc_cutoff = 0.33, save_results = False, use_confidence_weighting = False, use_enhanced_context = False):
         self.epoch_loss_in_contxt = 4
         self.sel_freq_crit_start_after = 4
         self.partial_freq_per_epoch = 2
@@ -29,22 +29,24 @@ class AlgoModulators():
         self.no_selection_epochs = 0
         self.rmv_avg_grad_signal = True
         self.layer = -2
-        
+
         self.select_low_loss_cluster = False
         self.n_clusters = 5
-        
+
         self._get_data_specs(data_operator)
         self._mod_algo_for_data()
-        
+
         self.lr = lr
         self.dropout = dropout
         self.nu = nu
         self.normalize_grads_contx = normalize_grads_contx
         self.use_confidence_weighting = use_confidence_weighting  # Enable confidence-weighted gradient selection
+        self.use_enhanced_context = use_enhanced_context  # Add hypothesis class ID to enriched vectors
         #torch.manual_seed(42)
-        
+
         self.eps_value = eps_value
         self.min_samples_ratio = min_samples_ratio
+        self.hyp_per_sample = data_operator.num_hyp_comb
         
         
     def _get_data_specs(self, data_operator):
@@ -243,30 +245,42 @@ def gradient_selection(DO, AM, epoch, hypothesis_grads, partial_full_grads, batc
         group_grads = hypothesis_grads[group*hyp_per_sample:(group+1)*hyp_per_sample]
         group_inpt_hyp = input_hypothesis[group*hyp_per_sample:(group+1)*hyp_per_sample]
         #group_outpt_hyp = labels[group*hyp_per_sample:(group+1)*hyp_per_sample] #predictions
-        
+
         if epoch > AM.epoch_loss_in_contxt:
             group_loss_hyp = individual_losses[group*hyp_per_sample:(group+1)*hyp_per_sample]
         grad_interest = []
         for i, grads in enumerate(group_grads):
             for j, gradi in enumerate(grads[-2:-1]):
-                grad_interest.append(gradi)          
+                grad_interest.append(gradi)
         #group_grad_mean = torch.mean(torch.stack(grad_interest), dim=0)
         #grad_interest = [gradi-group_grad_mean for gradi in grad_interest]
         grad_interest = [vector.view(-1,1) for vector in grad_interest]
         grad_interest = torch.cat(grad_interest, dim = 1)
-        
+
         if AM.gradwcontext == True:
             if AM.has_ohe:
                 pass
                 #group_inpt_hyp, removed_indxs = remove_binary_columns(group_inpt_hyp)
             group_inpt_hyp = torch.transpose(group_inpt_hyp, 0, 1)
             #group_outpt_hyp = torch.transpose(group_outpt_hyp, 0, 1)
-            
+
+            # Enhanced context: add hypothesis class ID (one-hot encoding) to better distinguish hypotheses
+            if AM.use_enhanced_context:
+                # Create one-hot encoding for each hypothesis class [hyp_per_sample x hyp_per_sample]
+                hyp_class_onehot = torch.eye(hyp_per_sample, dtype=group_inpt_hyp.dtype, device=group_inpt_hyp.device)
+
             if epoch > AM.epoch_loss_in_contxt:
                 group_loss_hyp = torch.transpose(group_loss_hyp, 0, 1)
-                grad_context_interest = torch.cat([grad_interest, group_inpt_hyp, group_loss_hyp], dim = 0) # group_outpt_hyp,
+                if AM.use_enhanced_context:
+                    # Add hypothesis class ID one-hot encoding to enriched vector
+                    grad_context_interest = torch.cat([grad_interest, group_inpt_hyp, group_loss_hyp, hyp_class_onehot], dim = 0)
+                else:
+                    grad_context_interest = torch.cat([grad_interest, group_inpt_hyp, group_loss_hyp], dim = 0) # group_outpt_hyp,
             else:
-                grad_context_interest = torch.cat([grad_interest, group_inpt_hyp], dim = 0) #, group_outpt_hyp
+                if AM.use_enhanced_context:
+                    grad_context_interest = torch.cat([grad_interest, group_inpt_hyp, hyp_class_onehot], dim = 0)
+                else:
+                    grad_context_interest = torch.cat([grad_interest, group_inpt_hyp], dim = 0) #, group_outpt_hyp
             [all_hyp[i].append(grad_context_interest[:,i]) for i in range(hyp_per_sample)]
         else:
             [all_hyp[i].append(grad_interest[:,i]) for i in range(hyp_per_sample)]
@@ -281,14 +295,23 @@ def gradient_selection(DO, AM, epoch, hypothesis_grads, partial_full_grads, batc
                 pass
                 #part_inpt, _ = remove_binary_columns(part_inpt, removed_indxs)
             grad_int = grad_int[-2].reshape(grad_int[-2].shape[1])
+
+            # Enhanced context: add hypothesis class ID for partial data too
+            if AM.use_enhanced_context:
+                # Create one-hot encoding for the true hypothesis class
+                hyp_onehot = torch.zeros(hyp_per_sample, dtype=part_inpt.dtype, device=part_inpt.device)
+                hyp_onehot[t_h] = 1.0
+
             if epoch > AM.epoch_loss_in_contxt:
-                partial_grad_contxt = torch.cat([grad_int, part_inpt, part_loss], dim = 0) #, part_outpt  part_inpt/100,
+                if AM.use_enhanced_context:
+                    partial_grad_contxt = torch.cat([grad_int, part_inpt, part_loss, hyp_onehot], dim = 0)
+                else:
+                    partial_grad_contxt = torch.cat([grad_int, part_inpt, part_loss], dim = 0) #, part_outpt  part_inpt/100,
             else:
-                partial_grad_contxt = torch.cat([grad_int, part_inpt], dim = 0) #, part_outpt, part_inpt/100,
-            # print(t_h)
-            # print(partial_grad_contxt)
-            # import sys
-            # sys.exit()
+                if AM.use_enhanced_context:
+                    partial_grad_contxt = torch.cat([grad_int, part_inpt, hyp_onehot], dim = 0)
+                else:
+                    partial_grad_contxt = torch.cat([grad_int, part_inpt], dim = 0) #, part_outpt, part_inpt/100,
             all_partial_hyp[t_h].append(partial_grad_contxt)
         else:
             all_partial_hyp[t_h].append(grad_int[-2].reshape(grad_int[-2].shape[1]))
