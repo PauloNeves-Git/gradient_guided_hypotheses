@@ -160,7 +160,7 @@ class DeepRegressor():
     
         # use the trained model to impute missing values
         imputed_rows_tensor = model(incomplete_rows_tensor_input)
-        imputed_rows = imputed_rows_tensor.detach().numpy()
+        imputed_rows = imputed_rows_tensor.detach().cpu().numpy()
     
         # combine complete and imputed rows
         matrix_imputed = matrix.copy()

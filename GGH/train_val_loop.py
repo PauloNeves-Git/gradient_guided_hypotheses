@@ -254,8 +254,8 @@ class TrainValidationManager():
                         val_preds = model(DO.known_val_input_tensor)
                     model.train()
                     
-                    val_preds = torch.sigmoid(val_preds).detach().numpy()
-                    val_labels = DO.val_outcomes_tensor.detach().numpy()
+                    val_preds = torch.sigmoid(val_preds).detach().cpu().numpy()
+                    val_labels = DO.val_outcomes_tensor.detach().cpu().numpy()
                     valid_auc = roc_auc_score(val_labels, val_preds)
                     
                     self.valid_auc_history.append(valid_auc)

@@ -340,9 +340,9 @@ def gradient_selection(DO, AM, epoch, hypothesis_grads, partial_full_grads, batc
     if AM.bi_class_sel:
         use_model = 'logistic_regression' #logistic_regression; random_forest, 'svm' 0.0095 epochs 100 per class; logistic_regression 0.0085 epochs 45 ;random_forest 0.012 epochs 50; 
         for class_id, (hyp_class_grads, hyp_full_class_grads, hyp_partial_class_grads, hyp_inc_partial_class_grads) in enumerate(zip(all_hyp, all_full_hyp, all_partial_hyp, all_inc_partial_hyp)):
-            class_1_vectors = [gradi.numpy() for gradi in hyp_partial_class_grads]
-            class_2_vectors = [gradi.numpy() for gradi in hyp_inc_partial_class_grads]
-            unknown_vectors = [gradi.numpy() for gradi in hyp_class_grads]
+            class_1_vectors = [gradi.cpu().numpy() for gradi in hyp_partial_class_grads]
+            class_2_vectors = [gradi.cpu().numpy() for gradi in hyp_inc_partial_class_grads]
+            unknown_vectors = [gradi.cpu().numpy() for gradi in hyp_class_grads]
             
             X_train, y_train = prepare_binary_classification_data(class_2_vectors, class_1_vectors, random_state=DO.rand_state)
             grad_bi_model = train_model(X_train, y_train, model_name=use_model)
@@ -627,7 +627,7 @@ def get_2nd2last_grad(all_grads, inputs, individual_losses, gradwcontext, layer 
 def process_tensors_with_dbscan(all_grads, tensors, eps: float = 0.2, min_samples: int = 10):
     
     # Flatten the tensors and convert the list of tensors to a NumPy array
-    data = torch.stack([t.flatten() for t in tensors]).detach().numpy()
+    data = torch.stack([t.flatten() for t in tensors]).detach().cpu().numpy()
     
     # Apply DBSCAN clustering
     clustering = DBSCAN(eps=eps, min_samples=min_samples).fit(data)

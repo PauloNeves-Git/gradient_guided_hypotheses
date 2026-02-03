@@ -94,7 +94,7 @@ def visualize_train_val_error(DO, TVM):
 def model_predict(TVM, model, tensors):
     model.eval()
     val_pred = model(tensors)
-    val_pred = val_pred.detach().numpy()
+    val_pred = val_pred.detach().cpu().numpy()
     return val_pred
 
 
@@ -459,15 +459,15 @@ class Inspector():
                                 test_predictions = model(DO.known_test_input_tensor)
                             #print(r2_score(test_predictions.detach().numpy(), DO.df_test[DO.target_vars].values))
                             if task_type == "regression":
-                                r2_scores.append(r2_score(DO.df_test[DO.target_vars].values, test_predictions.detach().numpy()))
-                                mean_squared_errors.append(mean_squared_error(DO.df_test[DO.target_vars].values, test_predictions.detach().numpy()))
-                                mean_absolute_errors.append(mean_absolute_error(DO.df_test[DO.target_vars].values, test_predictions.detach().numpy()))
-                                explained_variance_scores.append(explained_variance_score(DO.df_test[DO.target_vars].values, test_predictions.detach().numpy()))
+                                r2_scores.append(r2_score(DO.df_test[DO.target_vars].values, test_predictions.detach().cpu().numpy()))
+                                mean_squared_errors.append(mean_squared_error(DO.df_test[DO.target_vars].values, test_predictions.detach().cpu().numpy()))
+                                mean_absolute_errors.append(mean_absolute_error(DO.df_test[DO.target_vars].values, test_predictions.detach().cpu().numpy()))
+                                explained_variance_scores.append(explained_variance_score(DO.df_test[DO.target_vars].values, test_predictions.detach().cpu().numpy()))
                                 rand_states.append(rand_state)
                             elif task_type == "classification":
                                 #print("5")
-                                accuracy_scores.append(accuracy_score(DO.df_test[DO.target_vars].values, round_to_binary(test_predictions.detach().numpy())))
-                                roc_auc_scores.append(roc_auc_score(DO.df_test[DO.target_vars].values, test_predictions.detach().numpy()))
+                                accuracy_scores.append(accuracy_score(DO.df_test[DO.target_vars].values, round_to_binary(test_predictions.detach().cpu().numpy())))
+                                roc_auc_scores.append(roc_auc_score(DO.df_test[DO.target_vars].values, test_predictions.detach().cpu().numpy()))
                                 rand_states.append(rand_state)
                             else:
                                 print("task_type has to be regression or classification")
