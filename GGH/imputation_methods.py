@@ -39,6 +39,7 @@ class Imputer():
         }
         try:
             self.imputers["TabPFN"] = TabPFNImputer(rand_state=self.rand_state)
+            self.imputers["TabPFN Regressor"] = TabPFNRegressorImputer(rand_state=self.rand_state)
         except ImportError:
             warnings.warn("TabPFN not installed; skipping TabPFN imputation benchmark.")
         self.results_dict = {}
@@ -297,6 +298,10 @@ class TabPFNImputer():
         if not mask.any():
             return matrix
 
+        # Set random seed for reproducibility (since TabPFN API changed)
+        np.random.seed(self.rand_state)
+        torch.manual_seed(self.rand_state)
+
         column = np.argwhere(np.sum(mask, axis=0) > 0)[0, 0]
 
         X = np.delete(matrix, column, axis=1)
@@ -307,17 +312,91 @@ class TabPFNImputer():
         y_train = y[known_mask]
         X_missing = X[mask[:, column]]
 
-        model_kwargs = dict(
-            device=self.device,
-            seed=self.rand_state,
-            N_ensemble_configurations=self.ensemble_size,
-        )
-
-        # Train a classifier over the known labels and map predictions back
+        # TabPFN API changed significantly between versions - try different parameter combinations
         unique_labels, encoded_labels = np.unique(y_train, return_inverse=True)
-        model = self.classifier_cls(**model_kwargs)
+
+        # Try different API versions in order of preference
+        model = None
+        for kwargs in [
+            dict(device=self.device, N_ensemble_configurations=self.ensemble_size),  # Old API
+            dict(device=self.device, n_estimators=self.ensemble_size),  # Possible new API
+            dict(device=self.device),  # Minimal parameters
+            dict(),  # No parameters at all
+        ]:
+            try:
+                model = self.classifier_cls(**kwargs)
+                break
+            except TypeError:
+                continue
+
+        if model is None:
+            raise RuntimeError("Could not initialize TabPFNClassifier with any known parameter combination")
         model.fit(X_train, encoded_labels)
         imputed_values = unique_labels[model.predict(X_missing)]
+
+        matrix_imputed = matrix.copy()
+        matrix_imputed[mask[:, column].reshape(mask[:, column].shape[0]), column] = imputed_values.reshape(imputed_values.shape[0])
+
+        return matrix_imputed
+
+
+class TabPFNRegressorImputer():
+    """Imputation wrapper around TabPFN Regressor.
+
+    Uses TabPFNRegressor to predict continuous values for the missing column.
+    Better suited for truly continuous missing variables.
+    """
+
+    def __init__(
+        self,
+        rand_state: int,
+        device: Optional[str] = None,
+    ):
+        self.rand_state = rand_state
+        self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
+
+        from tabpfn import TabPFNRegressor
+
+        self.regressor_cls = TabPFNRegressor
+
+    def fit_transform(self, matrix: np.ndarray) -> np.ndarray:
+        mask = np.isnan(matrix)
+
+        # if no missing values, return the matrix untouched
+        if not mask.any():
+            return matrix
+
+        # Set random seed for reproducibility
+        np.random.seed(self.rand_state)
+        torch.manual_seed(self.rand_state)
+
+        column = np.argwhere(np.sum(mask, axis=0) > 0)[0, 0]
+
+        X = np.delete(matrix, column, axis=1)
+        y = matrix[:, column]
+
+        known_mask = ~mask[:, column]
+        X_train = X[known_mask]
+        y_train = y[known_mask]
+        X_missing = X[mask[:, column]]
+
+        # Try different API versions in order of preference
+        model = None
+        for kwargs in [
+            dict(device=self.device),  # Minimal parameters
+            dict(),  # No parameters at all
+        ]:
+            try:
+                model = self.regressor_cls(**kwargs)
+                break
+            except TypeError:
+                continue
+
+        if model is None:
+            raise RuntimeError("Could not initialize TabPFNRegressor with any known parameter combination")
+
+        model.fit(X_train, y_train)
+        imputed_values = model.predict(X_missing)
 
         matrix_imputed = matrix.copy()
         matrix_imputed[mask[:, column].reshape(mask[:, column].shape[0]), column] = imputed_values.reshape(imputed_values.shape[0])
