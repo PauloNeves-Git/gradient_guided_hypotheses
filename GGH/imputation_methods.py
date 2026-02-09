@@ -38,7 +38,10 @@ class Imputer():
                             #("BiScaler", BiScaler()),
         }
         try:
-            self.imputers["TabPFN"] = TabPFNImputer(rand_state=self.rand_state)
+            # Pass hypothesis values to TabPFN to handle >10 unique classes
+            # DO.hypothesis is a list of hypothesis arrays, one per missing variable
+            hyp_values = DO.hypothesis[0] if hasattr(DO, 'hypothesis') and DO.hypothesis else None
+            self.imputers["TabPFN"] = TabPFNImputer(rand_state=self.rand_state, hypothesis_values=hyp_values)
             self.imputers["TabPFN Regressor"] = TabPFNRegressorImputer(rand_state=self.rand_state)
         except ImportError:
             warnings.warn("TabPFN not installed; skipping TabPFN imputation benchmark.")
@@ -275,6 +278,10 @@ class TabPFNImputer():
     The TabPFN library primarily targets classification; the wrapper trains a
     classifier on the observed target values and uses those predictions to fill
     the missing column.
+
+    When hypothesis_values is provided, maps continuous values to nearest hypothesis
+    class before classification. This ensures TabPFN always has ≤10 classes (matching
+    GGH's hypothesis-based approach) and provides fair comparison between methods.
     """
 
     def __init__(
@@ -282,10 +289,12 @@ class TabPFNImputer():
         rand_state: int,
         device: Optional[str] = None,
         ensemble_size: int = 32,
+        hypothesis_values: Optional[list] = None,
     ):
         self.rand_state = rand_state
         self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
         self.ensemble_size = ensemble_size
+        self.hypothesis_values = np.array(hypothesis_values) if hypothesis_values is not None else None
 
         from tabpfn import TabPFNClassifier
 
@@ -312,8 +321,26 @@ class TabPFNImputer():
         y_train = y[known_mask]
         X_missing = X[mask[:, column]]
 
+        # Map to hypothesis classes if provided - TabPFN is a classifier so it should
+        # always use hypothesis values as the discrete classes to predict
+        if self.hypothesis_values is not None:
+            # Map each y value to nearest hypothesis value
+            y_train_mapped = np.array([
+                self.hypothesis_values[np.argmin(np.abs(self.hypothesis_values - v))]
+                for v in y_train
+            ])
+        else:
+            y_train_mapped = y_train
+
         # TabPFN API changed significantly between versions - try different parameter combinations
-        unique_labels, encoded_labels = np.unique(y_train, return_inverse=True)
+        unique_labels, encoded_labels = np.unique(y_train_mapped, return_inverse=True)
+
+        # Check class limit even after mapping
+        if len(unique_labels) > 10:
+            raise ValueError(
+                f"Number of classes `{len(unique_labels)}` exceeds the maximum number of classes `10` "
+                f"officially supported by TabPFN. Provide hypothesis_values to map to fewer classes."
+            )
 
         # Try different API versions in order of preference
         model = None
