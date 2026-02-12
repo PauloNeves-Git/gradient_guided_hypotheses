@@ -1,0 +1,770 @@
+\documentclass[11pt]{article}
+
+% Packages
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{amsmath,amssymb}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{hyperref}
+\usepackage[margin=1in]{geometry}
+\usepackage{natbib}
+\usepackage{caption}
+\usepackage{subcaption}
+\usepackage{algorithm}
+\usepackage{algorithmic}
+\usepackage{multirow}
+\usepackage{xcolor}
+
+\hypersetup{
+    colorlinks=true,
+    linkcolor=blue,
+    citecolor=blue,
+    urlcolor=blue
+}
+
+% Custom commands
+\newcommand{\gradplus}{\nabla f^{+}}
+\newcommand{\Rsq}{R^{2}}
+
+\title{Gradient Guided Hypotheses: A Unified Solution to Enable Machine Learning Models on Scarce and Noisy Data Regimes}
+
+\author{
+    Paulo Neves$^{1,2,*}$, J\"{o}rg K. Wegner$^{1}$, Philippe Schwaller$^{2,3}$ \\
+    \\
+    $^{1}$ In-Silico Discovery (ISD), Janssen Research \& Development, Janssen Pharmaceutica N.V. \\
+    $^{2}$ ISIC, EPFL, Laboratory of Artificial Chemical Intelligence (LIAC), Lausanne, 1050, VD, Switzerland \\
+    $^{3}$ National Centre of Competence in Research (NCCR) Catalysis, \\
+    Ecole Polytechnique F\'{e}d\'{e}rale de Lausanne (EPFL), Lausanne, Switzerland \\
+    \\
+    $^{*}$Corresponding author: \texttt{pneves6@its.jnj.com}
+}
+
+\date{}
+
+\begin{document}
+
+\maketitle
+
+% ============================================================================
+% ABSTRACT
+% ============================================================================
+\begin{abstract}
+Ensuring high-quality data is paramount for maximizing the performance of machine learning models and business intelligence systems. However, challenges in data quality, including noise in data capture, missing records, limited data production, and confounding variables, significantly constrain the potential performance of these systems. In this study, we propose an architecture-agnostic algorithm, Gradient Guided Hypotheses (GGH), designed to address these challenges. GGH analyses enriched gradients ($\gradplus$) from hypotheses as a proxy of distinct and possibly contradictory patterns in the data. The method employs a multi-iteration soft refinement process, where hypotheses are scored via cosine similarity of their enriched gradients to anchor centroids derived from known ground truth data, and assigned continuous weights between 0.1 and 1.0 rather than binary inclusion or exclusion. This soft weighting scheme, combined with a dedicated dual-pathway neural network architecture, enables GGH to handle missing and noisy data through a unified framework that perceives both challenges as facets of the same overarching issue: the propagation of erroneous information.
+
+Experimental validation of GGH is conducted using four real-world open-source datasets (Photocell Degradation, Photoredox Yield, Airfoil Self-Noise, and Wine Quality), where records with missing rates of up to 97\% are simulated. Comparative analysis with state-of-the-art imputation methods, including TabPFN, KNN, MissForest, MICE, MIDAS, HyperImpute, SoftImpute, and Matrix Factorization, demonstrates that GGH significantly outperforms all competitors across all four datasets ($p < 0.05$, paired $t$-test). Additionally, GGH's noise detection capabilities are validated across three datasets by introducing simulated noise and applying DBSCAN-based gradient clustering to identify noisy samples, achieving detection precision above 94\% across all datasets tested. This study presents GGH as a promising solution for improving data quality and model performance in various applications.
+\end{abstract}
+
+% ============================================================================
+% INTRODUCTION
+% ============================================================================
+\section{Introduction}
+
+Capturing and representing the real world through numerical vector representations presents multiple complex challenges. Two of the most critical are missing data and the inaccuracy of the data collected, a phenomenon well-documented in the literature \cite{thorne2020, dakka2021, graham2009, jager2021}.
+
+Inaccurate or noisy data is a widely recognized problem in data-driven methodologies, often leading to a degradation in model performance \cite{gupta2019}. Even high performance on standard benchmarks, such as the ImageNet validation set, may not accurately reflect a model's effectiveness in real-world scenarios, as highlighted by Northcutt et al.\ \cite{northcutt2021}.
+
+The challenge of missing data can be subdivided into two primary forms: a variable can be partially missing, or completely omitted from a dataset. If the latter has a causal link to the dependent variable, it is denominated as a confounding variable. Identifying and addressing the impact of such variables is crucial across various domains, from health research \cite{vanstralen2010, halperin2015} to economics \cite{varian2016}. If data is accurately captured without missing values, the residual ``noise'' can be attributed to the influence of confounding variables. Therefore, distinguishing between data instances whose outcome is fully explained by the recorded variables and those that are not, may offer a unified solution to the challenges of missing and inaccurate data.
+
+The objective of this publication is twofold: to introduce a novel technique to tackle the dual issues of missing and inaccurate data, and to inspire a new paradigm. In this paradigm, low-cost data production efforts could target confounding variables to scarcely populate the training data, which combined with GGH would enable models to achieve some understanding of the confounding dynamics.
+
+% ============================================================================
+% STATE OF THE ART
+% ============================================================================
+\section{State of the Art}
+
+\subsection{Noise Detection}
+
+Addressing noise in datasets remains a critical challenge in the fields of machine learning (ML) and data analysis, as it can significantly affect the accuracy and efficiency of the models and insights that can be extracted from the data \cite{gamberger2000}. Noise can be subdivided into two categories, feature noise and label noise, which most commonly occur when features or label instances are incorrectly captured or assigned.
+
+The first noise detection methods can be traced back to the statistical techniques pioneered by Karl Pearson in the early 20th century. Notable among these is the Z-score analysis, which assesses data point anomalies by its distance to the mean in standard deviations. Another method from the same period, the Interquartile Range, employs a similar approach but uses a percentile-based threshold instead of standard deviations.
+
+Over time subsequent research has been directed towards generalist label noise detection methods due to their higher impact. However, domain-specific methods and generalist feature noise detection have also made noteworthy strides. Early examples of such domain-specific metrics are the signal-to-noise ratio introduced with the development of electrical communication systems. More recently, other domain-specific methods were introduced, such as those applied to genomic quality scores in bioinformatics. Noteworthy strides have also been made in feature noise detection, such as the pairwise attribute noise detection algorithm (PANDA) which surpassed nearest-neighbor based techniques \cite{hulse2007} in 2007 before the popularization of ML methods. As more computing power became available, ensemble-based methods emerged, leveraging existing techniques to form more robust solutions. These ensemble approaches have consistently demonstrated superior efficacy in identifying noisy instances, thus providing more accurate and appropriate methodologies with uncertainty estimation for handling noisy datasets \cite{gupta2019ensemble}.
+
+In parallel to the development of noise detection techniques, there has also been progress with inherently noise-resilient algorithms such as Random Forest (RF) and Neural Networks (NN). These algorithms have shown to some extent the ability to address random systematic label noise, offering an indirect partial solution to the noise challenge. This approach inadvertently constrains the choice of algorithms, excluding alternatives like Support Vector Machines (SVM) and logistic regression which are sensitive to noise \cite{pelletier2017}. It should be noted, of course, that at higher noise thresholds, even the performance of RF and NN are severely impacted. This vulnerability is especially evident in classification tasks where noise presence is binary. In such scenarios, an incorrect class label translates to a complete inaccuracy, as opposed to a percentage deviation that might occur with continuous variables.
+
+More recently, ML techniques have become popular tools for this task, we highlight the following which were utilized in combination with our method:
+
+\begin{itemize}
+    \item \textbf{DBSCAN} \cite{ester1996}: Density-Based Spatial Clustering of Applications with Noise is an unsupervised learning algorithm that identifies clusters in large spatial datasets by examining the local density of data points. The algorithm operates by categorizing data points into three types: core points, border points, and noise. Core points are defined by having a minimum number of neighbors within a specified epsilon ($\varepsilon$) radius. Border points are defined by not reaching the minimum threshold of neighbors but being within an epsilon of a core point. Finally, points that do not belong to any cluster are labeled as noise. This algorithm enables a definition of clusters with arbitrary shape and size, effectively grouping densely packed areas and distinguishing these from the less dense regions.
+
+    \item \textbf{OneClass SVMs} \cite{scholkopf2000}: A specialized form of SVMs designed for anomaly detection in unsupervised learning scenarios. This method works by mapping input data into a high-dimensional feature space using a kernel function, e.g.\ RBF or a polynomial function. Then the hyperplane that maximally separates the one class data from the origin of the transformed feature space is determined. This effectively creates a decision boundary to classify future points as part of the ``normal class'' or outliers.
+
+    \item \textbf{Autoencoders} \cite{bank2020}: Neural networks trained using an auto-regressive task. These NN have two main components, an encoder and a decoder. The encoder converts an input signal into a lower-dimensional latent space. The decoder then takes this compressed representation and is trained to reconstruct the original signal, hence making this an unsupervised learning method. Backpropagation is used to minimize the reconstruction error (the difference between the output and the original signal). Theoretically, a less noisy pattern takes fewer parameters to encode. As a result, the reconstruction error for these data points would be lower than those of the noisy samples, making this a versatile algorithm for noise detection.
+\end{itemize}
+
+\subsection{Data Imputation}
+
+The study subject that aims to provide solutions for missing data scenarios is the imputation field, this field started by improving on simple techniques for handling missing data (e.g., removing data points, removing features, using mean or median) which often produce biased results \cite{donders2006} and can now be subdivided into two large categories: statistical imputation and machine learning-based imputation.
+
+No single imputation method consistently outperforms the rest. The effectiveness of a method depends on various factors, including the type of data, the pattern of missing values, and the specific constraints of the study \cite{pan2023}. This variability is underscored by numerous benchmark studies in the field, which often reach different conclusions when applied to different datasets. J\"{a}ger et al.\ \cite{jager2021} found random-forest-based imputation to be the most performant, Lin et al.\ \cite{lin2022} concluded that deep learning methods are better across a varied selection of UCI-ML datasets with sizes ranging from 100s to 10000 data points, Sun et al.\ \cite{sun2023} found that MICE and random-forest-based methods are better for data with limited sample size (i.e., $n<30$k), while deep learning methods are better otherwise, and Jadhav et al.\ \cite{jadhav2019} found merit in using kNN for the data being tested.
+
+Given the wide array of performance results obtained from each method depending on datasets we elected to test all state-of-the-art methods previously mentioned, including additional techniques often used in imputation. The following is a comprehensive list of the methods tested in this work for comparison:
+
+\begin{itemize}
+    \item \textbf{MissForest} \cite{stekhoven2012}: An RF-based imputation method that has most of the properties that random-forest models have, such as the ability to capture non-linear relationships between variables, or its tendency to perform ``out-of-the-box'' without requiring almost any hyperparameter optimization.
+
+    \item \textbf{MICE} \cite{vanbuuren2011}: Multivariate Imputation by Chained Equations is a technique that uses a multiple imputation approach. Much like ensemble methods in noise detection, predicting multiple imputations can reduce the risk of biased estimates and be used to calculate uncertainty.
+
+    \item \textbf{MIDAS} \cite{gondara2017, lall2020midas}: Multiple Imputation using Denoising Autoencoders, a deep learning approach where autoencoders are trained multiple times to reconstruct the dataset from different partially corrupted versions; the final imputed values are an average of the imputations made by each of the autoencoders.
+
+    \item \textbf{HyperImpute} \cite{jarrett2022}: A recent state-of-the-art method that applies a generalized iterative imputation approach with an automatic model selection mechanism, enabling the method to adaptively select the most appropriate models for each feature based on the dataset's specific characteristics.
+
+    \item \textbf{Deep Regressor/Classifier}: Another group of deep learning-based techniques. Much like RF, it can capture non-linear patterns, but unlike random forests, deep learning techniques have been shown to utilize very large datasets more effectively.
+
+    \item \textbf{Weighted K-Nearest Neighbours (kNN)} \cite{troyanskaya2001}: A ``locally grounded'' method, meaning each imputation depends only on the respective neighbors, making it more appropriate than global imputation methods for datasets with strong local patterns.
+
+    \item \textbf{SoftImpute} \cite{mazumder2010, hastie2014}: An algorithm where the user defines a soft-threshold $\lambda$ and applies singular value decomposition (SVD) to the observed entries of the matrix with missing data; values from the low-rank representation are then used to fill in the original matrix iteratively.
+
+    \item \textbf{Matrix Factorization} \cite{koren2009}: Originally prevalent as an algorithm for recommender systems, this method works by using stochastic gradient descent (SGD) to decompose a matrix with missing values into two lower-dimensional matrices that, when multiplied, approximate the original matrix.
+
+    \item \textbf{TabPFN} \cite{hollmann2023}: A prior-data fitted network that performs in-context learning for tabular data. TabPFN is pre-trained on synthetic datasets and can make predictions on new datasets without task-specific training, effectively serving as a foundation model for tabular prediction tasks.
+\end{itemize}
+
+For kNN and MICE, we used the code implementations available in the Scikit-learn package \cite{pedregosa2011}. For applying the MissForest algorithm we utilized the implementation from the ``missingpy'' package, available on GitHub. For the deep learning regressor, we defined a simple dense network with one hidden layer and a rectified linear unit. To apply the SoftImpute and Matrix Factorization algorithms we used the implementations available at the python package ``fancyimpute'' \cite{rubinsteyn}. For the MIDAS application we used the MIDASPy package \cite{lall2023}.
+
+It is important to note that every method in the current state-of-the-art requires some initial partial data from which to infer the distribution of the variable to be imputed, and usually a somewhat high percentage of that variable. In other words, none of these methods indicate a pathway to address the problem of confounding variables. Furthermore, the current methods tend to fail when a high percentage of the variable is missing, as we will demonstrate in our experiments. These are limitations that GGH addresses: using a minor setup of prior knowledge (which can be prepared in minutes) it can produce different classes of hypotheses which will be scored based on enriched gradients ($\gradplus$). Using as little as one data point per hypothesis class, the algorithm can determine whether a hypothesis corroborates the overall pattern expected from ground truth data. Because this methodology focuses on the distribution of enriched gradients it can be used to find correct hypotheses, but also noisy data points, which are treated as an extension of incorrect hypotheses. In other words, the method tackles both the imputation challenge as well as the noise detection challenge and can benefit from advancements in the unsupervised clustering field.
+
+When considering scenarios where data about a specific variable is completely missing, a strategic data production effort could be used to obtain small percentages of overall complete data thus providing the requirements for the GGH framework to address confounding variables.
+
+% ============================================================================
+% METHODS
+% ============================================================================
+\section{Methods}
+
+Data scientists with domain expertise often have knowledge beyond the features described in the data set. For example, a group of researchers might know that the scale of a chemical reaction is correlated to the experimental noise on the dependent variable \cite{schwaller2021}, or that an independent variable like temperature, despite not consistently being captured in a patent/literature database, is still influencing the reaction outcome. Machine learning methods across different industries and research fields can benefit from the introduction of this knowledge but given the current architecture of deep learning models, the integration of additional unrecorded information is not trivial.
+
+Our work aims to provide a method to easily use prior knowledge of confounding or partially missing variables to reach a model with a working understanding of these influencing factors. As a result, producing models that outperform those trained solely on recorded or imputed variables.
+
+\textbf{Data Expansion through Hypotheses Generation:} GGH begins by transforming each incomplete data entry into a series of potential hypotheses. Each hypothesis represents a plausible completion of the missing data based on historical patterns and available complete rows.
+
+\textbf{Gradient Analysis for Hypothesis Evaluation:} Once the hypotheses are generated, GGH utilizes a gradient-based technique to evaluate them. During the training of the ML model, gradients are computed not only for the existing complete data but also for each generated hypothesis. These gradients are enriched with additional information and will be referenced as $\gradplus$. Since the ground truth should follow a subset of consistent patterns while the incorrect hypotheses should follow subsets of diverse patterns, the latent representation of the enriched gradients should be distributed differently across the latent space, with $\gradplus$ for the correct hypothesis being more constricted than the incorrect ones. It is then possible to use cosine similarity against anchor centroids derived from known partial data to score each hypothesis and assign continuous weights reflecting the confidence that each hypothesis is correct.
+
+\subsection{Gradient Guided Hypotheses}
+
+In Figure~\ref{fig:data_expansion}, there is an illustrated example of a dataset with four independent variables where $V_4$ contains a significant portion of its values missing. The scientist applying GGH should define a set of class values that $V_4$ can reasonably assume in a general distribution. This set of values is then used to automatically expand instances with missing $V_4$ values into all possible complete class hypotheses that the missing variable could have assumed. Even though a class hypothesis might not have the exact value the missing variable had, the algorithm will work if a sufficiently close class can be established. Simultaneously, if there are data points containing complete rows, these are separated and both the hypothesis group as well as the complete rows group go through a forward pass on an ML model.
+
+% Figure 1 placeholder
+\begin{figure}[htbp]
+    \centering
+    % \includegraphics[width=\textwidth]{figures/data_expansion.png}
+    \fbox{\parbox{0.9\textwidth}{\centering \vspace{2cm} Figure 1: Data expansion schematic \vspace{2cm}}}
+    \caption{Schematic representation of dataset being separated into complete and incomplete rows. With incomplete rows being expanded into multiple hypotheses, Hypothesis Class 1 (HC1), HC2, HC3 and so forth. Both batches of data then go through a forward pass of a method utilizing SGD for learning, and individual loss ($H_L$, $G_L$) and gradients ($H_{\nabla f}$, $G_{\nabla f}$) are calculated for each hypothesis ($H_i$) and each complete row ($G_i$).}
+    \label{fig:data_expansion}
+\end{figure}
+
+\subsubsection{Dual-Pathway Model Architecture}
+
+GGH employs a \textit{HypothesisAmplifyingModel}, a neural network architecture with separate processing pathways for shared (observed) features and hypothesis (missing variable) features. The shared pathway processes the fully observed input variables through a linear layer followed by a ReLU activation. The hypothesis pathway processes the hypothesized missing variable values through a deeper sub-network (two linear layers with ReLU activations), amplifying the gradient signal associated with the hypothesis features. The outputs of both pathways are concatenated and fed through a final prediction head. This architectural separation ensures that the gradients with respect to the hypothesis pathway carry a strong, distinguishable signal that can be leveraged for hypothesis scoring.
+
+\subsubsection{Four-Iteration Soft Refinement}
+
+Unlike binary selection approaches that include or exclude hypothesis gradients from backpropagation at each epoch, GGH v2 employs a four-iteration soft refinement process that assigns continuous weights to each hypothesis. The algorithm proceeds as follows:
+
+\paragraph{Iteration 1: Unbiased Training and Initial Scoring.}
+A \textit{HypothesisAmplifyingModel} is trained for $E_1$ epochs on all hypotheses without any selection bias, treating every hypothesis equally. During the final $E_a$ analysis epochs, per-sample gradients and losses are tracked. After training, \textit{anchor centroids} are computed from the known partial data:
+\begin{itemize}
+    \item \textbf{Partial correct anchors}: Mean enriched gradient vector computed from known correct hypotheses (ground truth data where all variables are observed).
+    \item \textbf{Blacklisted anchors}: Mean enriched gradient vector computed from known incorrect hypotheses (hypotheses of partial data that contradict the observed values).
+\end{itemize}
+
+The enriched gradient vector $\gradplus$ for each hypothesis is constructed by concatenating the gradient of the second-to-last layer with normalized input features:
+\begin{equation}
+    \gradplus_i = \left[ \nabla_{\theta_{L-1}} \mathcal{L}_i \;;\; \frac{(\mathbf{x}_i - \boldsymbol{\mu}_x)}{\boldsymbol{\sigma}_x} \cdot s_g \right]
+    \label{eq:enriched_grad}
+\end{equation}
+where $s_g$ is a gradient scale factor (mean gradient norm across all partial data) that balances the magnitude of the feature context relative to the gradient signal.
+
+Each non-partial hypothesis is then scored via cosine similarity:
+\begin{equation}
+    \text{score}_i = \frac{\gradplus_i \cdot \mathbf{a}_c^{(k)}}{\|\gradplus_i\| \|\mathbf{a}_c^{(k)}\|} - \frac{\gradplus_i \cdot \mathbf{a}_{ic}^{(k)}}{\|\gradplus_i\| \|\mathbf{a}_{ic}^{(k)}\|}
+    \label{eq:cosine_score}
+\end{equation}
+where $\mathbf{a}_c^{(k)}$ and $\mathbf{a}_{ic}^{(k)}$ are the correct and incorrect anchor centroids for hypothesis class $k$, respectively. For each sample, only the highest-scoring hypothesis is selected. Scores are converted to soft weights via a sigmoid function:
+\begin{equation}
+    w_i = w_{\min} + (1 - w_{\min}) \cdot \sigma\!\left(\frac{s_i - \bar{s}}{\hat{\sigma}_s \cdot T}\right)
+    \label{eq:soft_weight}
+\end{equation}
+where $w_{\min} = 0.1$ is the minimum weight, $T$ is a temperature parameter, and $\sigma(\cdot)$ denotes the sigmoid function.
+
+\paragraph{Iteration 2: Weighted Training.}
+A fresh \textit{HypothesisAmplifyingModel} is trained for $E_2$ epochs, where each hypothesis contributes to the loss proportionally to its assigned soft weight from Iteration~1. Known correct partial data is weighted with a dynamic partial weight $w_p$ to ensure ground truth examples maintain strong influence:
+\begin{equation}
+    \mathcal{L}_{\text{weighted}} = \frac{\sum_i w_i \cdot \ell_i}{\sum_i w_i}
+\end{equation}
+
+\paragraph{Iteration 3: Biased Rescoring.}
+Using the weighted (biased) model from Iteration~2, per-sample gradients and losses are recomputed over multiple passes. New anchor centroids are built from the biased model's gradient space, now enriched with both features and normalized loss values:
+\begin{equation}
+    \gradplus_{i,\text{biased}} = \left[ \nabla_{\theta_{L-1}} \mathcal{L}_i \;;\; \frac{(\mathbf{x}_i - \boldsymbol{\mu}_x)}{\boldsymbol{\sigma}_x} \cdot s_g \;;\; -\frac{(\ell_i - \bar{\ell})}{\hat{\sigma}_\ell} \cdot s_g \right]
+\end{equation}
+The negative sign on the loss term ensures that lower loss (more consistent with ground truth) contributes positively to the similarity score. New scores are computed against the biased anchors and converted to weights, which are then \textit{multiplied} with the Iteration~1 weights:
+\begin{equation}
+    w_i^{(3)} = w_i^{(1)} \times w_i^{(\text{biased})}
+\end{equation}
+followed by renormalization to the range $[w_{\min}, 1.0]$.
+
+\paragraph{Iteration 4: Loss-Based Adjustment.}
+A final adjustment uses the individual losses from the biased model as a regularization signal. The loss-based factor is computed as:
+\begin{equation}
+    w_i^{(\text{final})} = \max\!\left(w_{\min},\; w_i^{(3)} \cdot \left(1 - \alpha_\ell \cdot \sigma\!\left(\frac{\ell_i - \bar{\ell}}{\hat{\sigma}_\ell}\right)\right)\right)
+\end{equation}
+where $\alpha_\ell$ controls the influence of the loss adjustment (default 0.25). This step penalizes hypotheses with abnormally high loss relative to the population, while preserving the minimum weight floor.
+
+% Figure 2 placeholder - Algorithm schematic
+\begin{figure}[htbp]
+    \centering
+    % \includegraphics[width=\textwidth]{figures/algorithm_schematic.png}
+    \fbox{\parbox{0.9\textwidth}{\centering \vspace{2cm} Figure 2: GGH v2 algorithm schematic \vspace{2cm}}}
+    \caption{Schematic representation of the GGH soft refinement algorithm. After expanding the dataset with hypotheses and executing a forward pass (Figure~\ref{fig:data_expansion}), the algorithm proceeds through four iterations: (1) unbiased training with initial cosine-similarity scoring against anchor centroids, (2) weighted training using soft weights, (3) biased rescoring with weight multiplication and renormalization, and (4) loss-based adjustment. The final continuous weights determine the contribution of each hypothesis to the model trained for downstream prediction.}
+    \label{fig:algorithm_schematic}
+\end{figure}
+
+\subsubsection{Final Model Training}
+
+After the four-iteration soft refinement yields a set of continuous weights $\{w_i\}$ for each selected hypothesis, a final \textit{HypothesisAmplifyingModel} is trained using these weights. The model is trained with validation-based early stopping: at each epoch, the validation loss is computed, and the model checkpoint with the lowest validation loss is selected for test evaluation. Known partial correct data is included with a dynamic weight $w_p = w_{\text{base}} \cdot (1 + (1 - \bar{w}))$, where $\bar{w}$ is the mean final weight, ensuring that partial data has proportionally more influence when the algorithm is less confident about the hypothesis weights overall.
+
+\subsection{Enriched Gradients Distribution}
+
+To demonstrate how the algorithm is functioning we use a real-world open-source dataset from a study into the stability of organic photovoltaics \cite{langner2020}. This dataset reports the degradation of polymer blends for organic solar cells under exposure to light. To test the method as a solution for missing data, we separate the data into train-validation-test, and hide 97\% of the column containing the ratio of a polymer layer PCBM. After training with GGH, we select the enriched gradients for the last batch of hypotheses where PCBM hypothesized ratio in the blend is 60\%. Under normal circumstances, all $H\gradplus$ are estimated in an unsupervised scenario, meaning it would not be known \textit{a priori} which hypotheses are correct, but for the sake of demonstration, we separate $H\gradplus$ into correct and possibly incorrect hypotheses, using the complete dataset as reference. In Figure~\ref{fig:tsne_incorrect}, a tSNE plot shows how $H\gradplus$ generated from possibly incorrect hypotheses are distributed in the space, as well as the $G\gradplus$ the model had access to; Figure~\ref{fig:tsne_correct} shows the same plot but for the $H\gradplus$ generated from the correct hypothesis.
+
+% tSNE figures - placeholders
+\begin{figure}[htbp]
+    \centering
+    \fbox{\parbox{0.9\textwidth}{\centering \vspace{2cm} Figure 3: tSNE of incorrect hypotheses \vspace{2cm}}}
+    \caption{tSNE visualization by dimensionality reduction of enriched gradients vectors of potentially incorrect hypotheses and ground truth instances. Ground truth is defined as instances where no variable had missing data. Colour represents point density in the space.}
+    \label{fig:tsne_incorrect}
+\end{figure}
+
+\begin{figure}[htbp]
+    \centering
+    \fbox{\parbox{0.9\textwidth}{\centering \vspace{2cm} Figure 4: tSNE of correct hypotheses \vspace{2cm}}}
+    \caption{tSNE visualization by dimensionality reduction of enriched gradients vectors of correct hypotheses and ground truth instances. Ground truth is defined as instances where no variable had missing data. Colour represents point density in the space.}
+    \label{fig:tsne_correct}
+\end{figure}
+
+When comparing Figure~\ref{fig:tsne_incorrect} to Figure~\ref{fig:tsne_correct}, it is clear that the $H\gradplus$ from potentially incorrect hypotheses generate many more clusters that span across the latent space, while $H\gradplus$ from correct hypotheses cluster and concentrate in a specific section of the latent space. This is the property that GGH aims to enhance and capitalize on, to successfully distinguish correct hypotheses from incorrect ones. From Figure~\ref{fig:tsne_correct} it is also straightforward to comprehend why even just a single example of the ground truth data for a specific hypothesis class can suffice to identify the correct pattern cluster, a characteristic that is not present in any other state-of-the-art imputation method.
+
+The cosine similarity scoring in Equation~\ref{eq:cosine_score} can be understood as measuring the angular proximity of each hypothesis's enriched gradient vector to the correct anchor centroid relative to the incorrect anchor centroid. Hypotheses whose $\gradplus$ vectors are angularly closer to the correct anchor receive higher scores and consequently higher soft weights.
+
+We denominate the instances that generated the $\gradplus$ in Figure~\ref{fig:tsne_incorrect} as potentially incorrect hypotheses. This is because in scenarios where multiple values of the missing variable would lead to the same outcome, we can have multiple hypotheses generated for the same instance which are correct, but when evaluating the selection only one hypothesis is covered in the data. This means when the GGH selects potentially incorrect hypotheses what the method is doing is selecting $\gradplus$ which are similar to $G\gradplus$. Because these are similar it does not cause the model to diverge as much as if a distant incorrect $H\gradplus$ was selected instead.
+
+\subsection{Hypothesis Weight Distributions}
+
+The distribution of $\gradplus$ will depend on the data, model architecture, parameter initialization, hypothesis class and will change with each weight update. While Figure~\ref{fig:tsne_incorrect} and Figure~\ref{fig:tsne_correct} are useful to analyze how the $\gradplus$ are behaving, an illustration that combines the quality of the enriched gradient generation with the scoring quality is also valuable.
+
+In the GGH v2 soft refinement, rather than binary selection probabilities, each hypothesis receives a continuous weight between $w_{\min}$ and 1.0. Figure~\ref{fig:weight_dist} presents the weight distributions for correct and incorrect hypotheses across representative datasets. In an ideal scenario, correct hypotheses would cluster near weight 1.0, while incorrect hypotheses would cluster near $w_{\min}$. The separation between these two distributions indicates the algorithm's ability to distinguish correct from incorrect hypotheses. The weight distributions also include known partial correct data, which enters the final training at weight 1.0 regardless of the scoring outcome.
+
+% Weight distribution figure
+\begin{figure}[htbp]
+    \centering
+    \begin{subfigure}[b]{0.48\textwidth}
+        \includegraphics[width=\textwidth]{figures/photocell_weight_distributions.png}
+        \caption{Photocell Degradation}
+    \end{subfigure}
+    \hfill
+    \begin{subfigure}[b]{0.48\textwidth}
+        \includegraphics[width=\textwidth]{figures/airfoil_weight_distributions.png}
+        \caption{Airfoil Self-Noise}
+    \end{subfigure}
+    \\[0.5em]
+    \begin{subfigure}[b]{0.48\textwidth}
+        \includegraphics[width=\textwidth]{figures/photoredox_weight_distributions.png}
+        \caption{Photoredox Yield}
+    \end{subfigure}
+    \hfill
+    \begin{subfigure}[b]{0.48\textwidth}
+        \includegraphics[width=\textwidth]{figures/wine_weight_distributions.png}
+        \caption{Wine Quality}
+    \end{subfigure}
+    \caption{Weight distributions for correct (green) and incorrect (red) hypotheses after the four-iteration soft refinement process across all four benchmark datasets. The distributions show how GGH assigns higher weights to correct hypotheses and lower weights to incorrect ones. Partial correct data (known ground truth) enters at weight 1.0.}
+    \label{fig:weight_dist}
+\end{figure}
+
+\subsection{Noise Detection}
+
+One of the advantages of the GGH formulation is that it allows applying the same principles and techniques to both data imputation and noise detection challenges. Depending on the model and amount of noise, the weights of a model trained on a noisy dataset will converge to a different endpoint than the weights of the same model trained on clean data. Because the convergence endpoint is different, there is a high probability the gradients generated for each group are different as well, so the $\gradplus$ will cluster differently. This knowledge can be utilized to specifically identify noisy data points via density-based clustering.
+
+For noise detection, GGH uses the following pipeline:
+\begin{enumerate}
+    \item Train a model on the noisy dataset using standard optimization (Adam).
+    \item At the best model checkpoint, compute per-sample enriched gradients $\gradplus$ for the entire training set, enriched with individual loss values.
+    \item Apply DBSCAN clustering to the $\gradplus$ vectors. Outlier points (those not assigned to any dense cluster) are flagged as noisy.
+    \item A grid search over the DBSCAN hyperparameters ($\varepsilon$ and minimum samples ratio) is performed, with the best configuration selected based on validation loss after retraining on the cleaned data.
+    \item The model is retrained from scratch on the cleaned dataset (noisy samples removed).
+\end{enumerate}
+
+In Figure~\ref{fig:noise_tsne} it is possible to observe how $\gradplus$ generated from noisy data points cluster on the edges of the space, while $\gradplus$ from unaltered data points cluster in the center of the space. This topology allows the use of unsupervised density clustering methods like DBSCAN to separate the two groups.
+
+% Noise detection tSNE figure placeholder
+\begin{figure}[htbp]
+    \centering
+    \fbox{\parbox{0.9\textwidth}{\centering \vspace{2cm} Figure 6: Noise detection tSNE \vspace{2cm}}}
+    \caption{tSNE visualization by dimensionality reduction of enriched gradients vectors with colour representing point density in the space. A) Contains $\gradplus$ calculated from data points on which 40\% to 60\% of the target variable range is added as noise. B) Contains $\gradplus$ calculated from data points which are unaltered.}
+    \label{fig:noise_tsne}
+\end{figure}
+
+% ============================================================================
+% RESULTS
+% ============================================================================
+\section{Results}
+
+The visualizations previously shown in the manuscript give insights into how the different components of the algorithm are functioning. In this section, we validate GGH by comparing how it performs against current state-of-the-art imputation methods across four real-world datasets and scenarios. We also compare the performance of a model when trained with GGH-based noise filtering versus training on the data without applying noise detection.
+
+GGH is compared on the test set against baseline techniques and state-of-the-art imputation methods for all datasets. The baseline techniques are ``Full Info'' (training on only the fully observed rows) and ``Partial Info'' (training on all rows but dropping the missing variable column). When a very high percentage of a variable is missing (e.g., 97\%), it is common in the field of data science to drop this column, since it is expected that imputation will not be a worthy endeavor. In scenarios where the variables with missing data are important and should not be dropped, another common technique is to keep only the rows that have no missing data.
+
+For all imputation methods, we tested the eight methods discussed in Section~2.2. The individual imputation methods whose results are reported in the tables are those that achieved the best validation performance for each dataset. For all methods, early stopping is used to select the best checkpoint from each particular method for each validation split, and this checkpoint is then used to estimate test performance. All benchmarks are run across 15 independent random seeds.
+
+Statistical significance is assessed using paired $t$-tests comparing GGH against each competitor across the 15 random seeds, with significance declared at $\alpha = 0.05$.
+
+\subsection{Photocell Degradation}
+
+To validate the efficacy of GGH as a method to address variables with missing data, we selected an open-source dataset \cite{langner2020}, holding records of the degradation of polymer blends for organic solar cells under exposure to light. To test the method as a solution for missing data, we separate the data into train-validation-test and hide 97\% of the column with the ratio of a polymer layer PCBM. The initial dataset contained approximately 750 datapoints in the trainset; the PCBM ratios fall within one of 6 hypothesis classes, giving on average 125 values per hypothesis class. When simulating that 97\% of the values are missing there are on average only $\sim$3.75 ground truth data points per hypothesis class in the training set.
+
+When simulating a scenario with such a high ratio of missing data, we observe that applying current state-of-the-art imputation methods is comparable to or worse than using the baseline techniques, because these methods require considerable sampling of the distribution of the missing variable to correctly fill in the missing values. Because of the underlying algorithm of GGH, it is possible that as few as one to four data points per Hypothesis Class can already be used to identify the region of the pattern space that should be leveraged for training. However, there is still a reliance on ground truth examples, and when sampling a few data points randomly from its distribution, these ground truth data points can be representative or not of the overall distribution, hence the high standard deviation associated with applying GGH in such high ratios of missing data as observed in Table~\ref{tab:photocell_imputation}.
+
+\begin{table}[htbp]
+    \centering
+    \caption{Average performance ($\pm$ std) on the test set across 15 randomized runs for the Photocell Degradation regression task, with 97\% of the PCBM ratio variable missing. GGH significantly outperforms all competitors ($p < 0.001$ for $\Rsq$, paired $t$-test).}
+    \label{tab:photocell_imputation}
+    \begin{tabular}{lccc}
+        \toprule
+        \textbf{Method} & \textbf{$\Rsq$ Score} & \textbf{MSE ($\times 10^{-2}$)} & \textbf{MAE ($\times 10^{-2}$)} \\
+        \midrule
+        Full Info              & $0.174 \pm 0.102$ & $1.08 \pm 0.21$ & $7.68 \pm 0.80$ \\
+        Partial Info           & $0.143 \pm 0.041$ & $1.12 \pm 0.15$ & $7.72 \pm 0.54$ \\
+        KNN Imputer            & $-0.128 \pm 0.592$ & $1.55 \pm 0.91$ & $8.91 \pm 2.24$ \\
+        TabPFN                 & $-0.186 \pm 0.533$ & $1.55 \pm 0.65$ & $9.28 \pm 1.62$ \\
+        \textbf{GGH}          & $\mathbf{0.456 \pm 0.156}$ & $\mathbf{0.71 \pm 0.20}$ & $\mathbf{6.09 \pm 0.94}$ \\
+        \midrule
+        Complete Data (oracle) & $0.880 \pm 0.032$ & $0.16 \pm 0.04$ & $2.63 \pm 0.33$ \\
+        \bottomrule
+    \end{tabular}
+\end{table}
+
+In this scenario with very high ratios of missing data GGH represents the only viable solution, showing a large improvement over the state of the art. Such scenarios are not implausible; in fact, these could be manufactured as a novel approach to tackle unrecorded variables, because the data requirements are so low, small data production efforts could be executed to attain a few records on the unrecorded or highly missing variable.
+
+% Photocell R2 boxplot
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.7\textwidth]{figures/photocell_r2_boxplot.png}
+    \caption{$\Rsq$ score distribution across 15 runs for the Photocell Degradation imputation benchmark. GGH achieves a median $\Rsq$ substantially higher than all competitors.}
+    \label{fig:photocell_r2_boxplot}
+\end{figure}
+
+\subsection{Photoredox Yield Estimation}
+
+For the second validation use case, we used a published high-throughput experimentation dataset of photoredox C--N coupling chemical reactions \cite{dreher2021}. This is an interesting high-quality dataset to test GGH in a synthesis modeling use case, because in addition to containing molecular structures, it also captured molecular ratios with high granularity for each reaction. Even when training large language models on millions of chemical reactions represented as SMILES, the performance of these models is limited by available complete data, with condition and procedure data missing from the modeling having a large impact on train-test with high-quality datasets \cite{neves2023}. With GGH, it is possible to generate hypotheses for the missing condition, e.g.\ molecular ratios, and learn about the impact of molecular ratios in highly incomplete synthesis data.
+
+To simulate such a scenario, we mask 70\% of the molecular ratios for the photocatalyst and piperidine, and train a regression model to estimate LC-MS, a proxy for product yield. Reactivity in photoredox C--N coupling reactions involves complex molecular interactions; this complexity is magnified by varying molecular ratios. In this use case, GGH performs significantly better, enabling the model to learn the impact of this highly complex and incomplete variable, as observed in Table~\ref{tab:photoredox_imputation}.
+
+\begin{table}[htbp]
+    \centering
+    \caption{Average performance ($\pm$ std) on the test set across 15 randomized runs for the Photoredox Yield Estimation task, with 70\% of the values for photocatalyst and piperidine equivalents missing. GGH significantly outperforms the best competitor on $\Rsq$ ($p = 0.002$, paired $t$-test).}
+    \label{tab:photoredox_imputation}
+    \begin{tabular}{lccc}
+        \toprule
+        \textbf{Method} & \textbf{$\Rsq$ Score} & \textbf{MSE ($\times 10^{-2}$)} & \textbf{MAE ($\times 10^{-2}$)} \\
+        \midrule
+        Full Info              & $0.600 \pm 0.072$ & $2.00 \pm 0.36$ & $9.51 \pm 0.82$ \\
+        Partial Info           & $0.522 \pm 0.114$ & $2.39 \pm 0.58$ & $10.30 \pm 1.26$ \\
+        Soft Impute            & $0.596 \pm 0.102$ & $2.03 \pm 0.56$ & $9.51 \pm 1.18$ \\
+        TabPFN                 & $0.673 \pm 0.080$ & $1.64 \pm 0.42$ & $8.43 \pm 1.15$ \\
+        \textbf{GGH}          & $\mathbf{0.742 \pm 0.052}$ & $\mathbf{1.29 \pm 0.27}$ & $\mathbf{7.28 \pm 0.76}$ \\
+        \midrule
+        Complete Data (oracle) & $0.814 \pm 0.045$ & $0.93 \pm 0.25$ & $5.39 \pm 0.67$ \\
+        \bottomrule
+    \end{tabular}
+\end{table}
+
+% Photoredox R2 boxplot
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.7\textwidth]{figures/photoredox_r2_boxplot.png}
+    \caption{$\Rsq$ score distribution across 15 runs for the Photoredox Yield imputation benchmark.}
+    \label{fig:photoredox_r2_boxplot}
+\end{figure}
+
+\subsection{Airfoil Self-Noise}
+
+The third dataset used to benchmark the method against other state-of-the-art approaches is called Airfoil Self-Noise. This data set was made available by NASA at the UCI ML repository. It was obtained from a series of aerodynamic and acoustic tests of two and three-dimensional airfoil blade sections conducted in an anechoic wind tunnel. The goal is to perform a regression task to estimate the scaled sound pressure level in decibels.
+
+For this dataset 96\% of an important variable, chord length, was simulated to be missing at random. As shown in Table~\ref{tab:airfoil_imputation}, GGH significantly outperforms all competitors. Notably, TabPFN serves as the strongest baseline in this dataset, achieving $\Rsq = 0.796$, but GGH surpasses it with $\Rsq = 0.844$.
+
+\begin{table}[htbp]
+    \centering
+    \caption{Average performance ($\pm$ std) on the test set across 15 randomized runs for the Airfoil Self-Noise regression task, with 96\% of the values for chord length missing. GGH significantly outperforms all competitors ($p = 0.012$ vs TabPFN for $\Rsq$, paired $t$-test).}
+    \label{tab:airfoil_imputation}
+    \begin{tabular}{lccc}
+        \toprule
+        \textbf{Method} & \textbf{$\Rsq$ Score} & \textbf{MSE ($\times 10^{-2}$)} & \textbf{MAE} \\
+        \midrule
+        Full Info              & $0.713 \pm 0.068$ & $0.98 \pm 0.22$ & $7.70 \pm 0.89$ \\
+        Partial Info           & $0.664 \pm 0.083$ & $1.15 \pm 0.29$ & $8.23 \pm 1.07$ \\
+        KNN Imputer            & $0.466 \pm 0.244$ & $1.84 \pm 0.87$ & $10.38 \pm 2.47$ \\
+        Soft Impute            & $0.694 \pm 0.078$ & $1.05 \pm 0.27$ & $7.87 \pm 1.03$ \\
+        TabPFN                 & $0.796 \pm 0.060$ & $0.70 \pm 0.21$ & $6.39 \pm 0.97$ \\
+        \textbf{GGH}          & $\mathbf{0.844 \pm 0.044}$ & $\mathbf{0.53 \pm 0.15}$ & $\mathbf{5.56 \pm 0.78}$ \\
+        \midrule
+        Complete Data (oracle) & $0.896 \pm 0.029$ & $0.36 \pm 0.11$ & $4.50 \pm 0.56$ \\
+        \bottomrule
+    \end{tabular}
+\end{table}
+
+% Airfoil R2 boxplot
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.7\textwidth]{figures/airfoil_r2_boxplot.png}
+    \caption{$\Rsq$ score distribution across 15 runs for the Airfoil Self-Noise imputation benchmark.}
+    \label{fig:airfoil_r2_boxplot}
+\end{figure}
+
+\subsection{Wine Quality}
+
+The fourth dataset is the Wine Quality dataset from the UCI ML repository, containing physicochemical properties and sensory quality ratings of red wines. The goal is to predict the quality rating (an integer score from 3 to 8) as a regression task. This dataset provides an interesting test case because the target variable has limited discrete values, yet the underlying relationships between physicochemical properties and quality are continuous and complex.
+
+For this dataset, 97\% of the alcohol content variable was simulated to be missing at random. As shown in Table~\ref{tab:wine_imputation}, GGH again significantly outperforms all competitors. This dataset proved particularly challenging for imputation methods: both TabPFN and KNN Imputer achieved negative $\Rsq$ scores, indicating predictions worse than a constant mean predictor. GGH achieved the highest statistical significance in this dataset ($p < 0.001$ across all metrics).
+
+\begin{table}[htbp]
+    \centering
+    \caption{Average performance ($\pm$ std) on the test set across 15 randomized runs for the Wine Quality regression task, with 97\% of the alcohol content variable missing. GGH significantly outperforms all competitors ($p < 0.001$ for $\Rsq$, paired $t$-test).}
+    \label{tab:wine_imputation}
+    \begin{tabular}{lccc}
+        \toprule
+        \textbf{Method} & \textbf{$\Rsq$ Score} & \textbf{MSE ($\times 10^{-2}$)} & \textbf{MAE ($\times 10^{-2}$)} \\
+        \midrule
+        Full Info              & $0.165 \pm 0.061$ & $2.20 \pm 0.21$ & $11.58 \pm 0.58$ \\
+        Partial Info           & $0.124 \pm 0.072$ & $2.31 \pm 0.25$ & $11.85 \pm 0.68$ \\
+        KNN Imputer            & $-0.100 \pm 0.359$ & $2.91 \pm 0.96$ & $13.06 \pm 2.25$ \\
+        Soft Impute            & $0.134 \pm 0.068$ & $2.28 \pm 0.22$ & $11.77 \pm 0.63$ \\
+        TabPFN                 & $-0.076 \pm 0.245$ & $2.84 \pm 0.66$ & $12.87 \pm 1.68$ \\
+        \textbf{GGH}          & $\mathbf{0.266 \pm 0.059}$ & $\mathbf{1.93 \pm 0.18}$ & $\mathbf{10.86 \pm 0.50}$ \\
+        \midrule
+        Complete Data (oracle) & $0.396 \pm 0.064$ & $1.59 \pm 0.19$ & $9.79 \pm 0.49$ \\
+        \bottomrule
+    \end{tabular}
+\end{table}
+
+% Wine R2 boxplot
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.7\textwidth]{figures/wine_r2_boxplot.png}
+    \caption{$\Rsq$ score distribution across 15 runs for the Wine Quality imputation benchmark. GGH is the only method that consistently achieves positive $\Rsq$ across all runs.}
+    \label{fig:wine_r2_boxplot}
+\end{figure}
+
+\subsection{Noise Detection}
+
+The principles of gradient enrichment and gradient-based clustering can also be applied to detect noisy data points and to avoid training on erroneous information. To test the viability of using enriched gradients for distinguishing noisy data from clean data, a simulation of noise with the level of 40\% to 60\% of the target variable range was applied to 40\% of the training data across three datasets. GGH was then used to filter out the noisy data points using DBSCAN clustering on the enriched gradients, and a model was retrained on the resulting cleaned dataset.
+
+\subsubsection{Photocell Degradation Noise Detection}
+
+Table~\ref{tab:photocell_noise} presents the noise detection results for the Photocell Degradation dataset. Training on the GGH-filtered data recovers performance to nearly the level of training on clean data alone ($\Rsq = 0.845$ vs $0.843$ oracle), a substantial improvement over training on the noisy data ($\Rsq = 0.622$).
+
+\begin{table}[htbp]
+    \centering
+    \caption{Average performance ($\pm$ std) on the test set across 15 runs for Photocell Degradation noise detection, with simulated noise of 40--60\% deviation on the dependent variable in 40\% of the training data.}
+    \label{tab:photocell_noise}
+    \begin{tabular}{lccc}
+        \toprule
+        \textbf{Method} & \textbf{$\Rsq$ Score} & \textbf{MSE ($\times 10^{-3}$)} & \textbf{MAE ($\times 10^{-2}$)} \\
+        \midrule
+        Full Info (Clean)          & $0.843 \pm 0.050$ & $1.87 \pm 0.65$ & $3.11 \pm 0.40$ \\
+        Full Info Noisy            & $0.622 \pm 0.088$ & $4.51 \pm 1.07$ & $4.99 \pm 0.59$ \\
+        \textbf{GGH DBSCAN Filter} & $\mathbf{0.845 \pm 0.051}$ & $\mathbf{1.85 \pm 0.64}$ & $\mathbf{3.09 \pm 0.36}$ \\
+        \bottomrule
+    \end{tabular}
+\end{table}
+
+Table~\ref{tab:photocell_detection} reports the detection metrics. GGH achieves a precision of 99.4\%, meaning that when the method identifies a data point as noisy, it is almost certainly correct. The recall of 24.1\% indicates conservative detection---the method identifies only the most obvious noisy samples but does so with extremely high confidence.
+
+\begin{table}[htbp]
+    \centering
+    \caption{Noise detection metrics for Photocell Degradation (mean $\pm$ std across 15 runs).}
+    \label{tab:photocell_detection}
+    \begin{tabular}{lcccc}
+        \toprule
+        & \textbf{Precision} & \textbf{Recall} & \textbf{F1 Score} & \textbf{Accuracy} \\
+        \midrule
+        GGH DBSCAN & $0.994 \pm 0.024$ & $0.241 \pm 0.185$ & $0.360 \pm 0.209$ & $0.709 \pm 0.070$ \\
+        \bottomrule
+    \end{tabular}
+\end{table}
+
+% Photocell noise detection figures
+\begin{figure}[htbp]
+    \centering
+    \begin{subfigure}[b]{0.48\textwidth}
+        \includegraphics[width=\textwidth]{figures/photocell_noise_r2.png}
+        \caption{$\Rsq$ comparison}
+    \end{subfigure}
+    \hfill
+    \begin{subfigure}[b]{0.48\textwidth}
+        \includegraphics[width=\textwidth]{figures/photocell_detection_metrics.png}
+        \caption{Detection metrics}
+    \end{subfigure}
+    \caption{Photocell Degradation noise detection results across 15 runs.}
+    \label{fig:photocell_noise}
+\end{figure}
+
+\subsubsection{Airfoil Self-Noise Noise Detection}
+
+Table~\ref{tab:airfoil_noise} shows the noise detection results for the Airfoil Self-Noise dataset. GGH DBSCAN filtering recovers substantial performance ($\Rsq = 0.786$) compared to training on noisy data ($\Rsq = 0.615$), approaching the clean data baseline ($\Rsq = 0.836$).
+
+\begin{table}[htbp]
+    \centering
+    \caption{Average performance ($\pm$ std) on the test set across 15 runs for Airfoil Self-Noise noise detection, with simulated noise of 40--60\% deviation on the dependent variable in 40\% of the training data.}
+    \label{tab:airfoil_noise}
+    \begin{tabular}{lccc}
+        \toprule
+        \textbf{Method} & \textbf{$\Rsq$ Score} & \textbf{MSE ($\times 10^{-2}$)} & \textbf{MAE} \\
+        \midrule
+        Full Info (Clean)          & $0.836 \pm 0.044$ & $0.56 \pm 0.16$ & $5.61 \pm 0.79$ \\
+        Full Info Noisy            & $0.615 \pm 0.056$ & $1.32 \pm 0.20$ & $9.00 \pm 0.75$ \\
+        \textbf{GGH DBSCAN Filter} & $\mathbf{0.786 \pm 0.063}$ & $\mathbf{0.74 \pm 0.23}$ & $\mathbf{6.42 \pm 1.08}$ \\
+        \bottomrule
+    \end{tabular}
+\end{table}
+
+\begin{table}[htbp]
+    \centering
+    \caption{Noise detection metrics for Airfoil Self-Noise (mean $\pm$ std across 15 runs).}
+    \label{tab:airfoil_detection}
+    \begin{tabular}{lcccc}
+        \toprule
+        & \textbf{Precision} & \textbf{Recall} & \textbf{F1 Score} & \textbf{Accuracy} \\
+        \midrule
+        GGH DBSCAN & $0.955 \pm 0.059$ & $0.870 \pm 0.109$ & $0.906 \pm 0.073$ & $0.933 \pm 0.050$ \\
+        \bottomrule
+    \end{tabular}
+\end{table}
+
+% Airfoil noise detection figures
+\begin{figure}[htbp]
+    \centering
+    \begin{subfigure}[b]{0.48\textwidth}
+        \includegraphics[width=\textwidth]{figures/airfoil_noise_r2.png}
+        \caption{$\Rsq$ comparison}
+    \end{subfigure}
+    \hfill
+    \begin{subfigure}[b]{0.48\textwidth}
+        \includegraphics[width=\textwidth]{figures/airfoil_detection_metrics.png}
+        \caption{Detection metrics}
+    \end{subfigure}
+    \caption{Airfoil Self-Noise noise detection results across 15 runs.}
+    \label{fig:airfoil_noise}
+\end{figure}
+
+\subsubsection{Wine Quality Noise Detection}
+
+Table~\ref{tab:wine_noise} shows the noise detection results for the Wine Quality dataset. Despite the inherently lower predictive performance on this dataset (due to the discrete nature of the target variable and relatively weak feature-target relationships), GGH DBSCAN filtering still recovers most of the clean-data performance ($\Rsq = 0.298$ vs $0.306$ oracle).
+
+\begin{table}[htbp]
+    \centering
+    \caption{Average performance ($\pm$ std) on the test set across 15 runs for Wine Quality noise detection, with simulated noise of 40--60\% deviation on the dependent variable in 40\% of the training data.}
+    \label{tab:wine_noise}
+    \begin{tabular}{lccc}
+        \toprule
+        \textbf{Method} & \textbf{$\Rsq$ Score} & \textbf{MSE ($\times 10^{-2}$)} & \textbf{MAE ($\times 10^{-2}$)} \\
+        \midrule
+        Full Info (Clean)          & $0.306 \pm 0.057$ & $1.82 \pm 0.17$ & $10.59 \pm 0.52$ \\
+        Full Info Noisy            & $0.202 \pm 0.086$ & $2.09 \pm 0.21$ & $11.31 \pm 0.62$ \\
+        \textbf{GGH DBSCAN Filter} & $\mathbf{0.298 \pm 0.057}$ & $\mathbf{1.84 \pm 0.16}$ & $\mathbf{10.56 \pm 0.49}$ \\
+        \bottomrule
+    \end{tabular}
+\end{table}
+
+\begin{table}[htbp]
+    \centering
+    \caption{Noise detection metrics for Wine Quality (mean $\pm$ std across 15 runs).}
+    \label{tab:wine_detection}
+    \begin{tabular}{lcccc}
+        \toprule
+        & \textbf{Precision} & \textbf{Recall} & \textbf{F1 Score} & \textbf{Accuracy} \\
+        \midrule
+        GGH DBSCAN & $0.942 \pm 0.025$ & $0.776 \pm 0.167$ & $0.840 \pm 0.099$ & $0.890 \pm 0.057$ \\
+        \bottomrule
+    \end{tabular}
+\end{table}
+
+% Wine noise detection figures
+\begin{figure}[htbp]
+    \centering
+    \begin{subfigure}[b]{0.48\textwidth}
+        \includegraphics[width=\textwidth]{figures/wine_noise_r2.png}
+        \caption{$\Rsq$ comparison}
+    \end{subfigure}
+    \hfill
+    \begin{subfigure}[b]{0.48\textwidth}
+        \includegraphics[width=\textwidth]{figures/wine_detection_metrics.png}
+        \caption{Detection metrics}
+    \end{subfigure}
+    \caption{Wine Quality noise detection results across 15 runs.}
+    \label{fig:wine_noise}
+\end{figure}
+
+% ============================================================================
+% DISCUSSION
+% ============================================================================
+\section{Discussion}
+
+The Gradient Guided Hypotheses (GGH) method addresses critical challenges in handling missing and noisy data, applicable across various scientific and industrial domains. By generating hypotheses for missing data and distinguishing noisy data through gradient analysis, GGH enhances both data quality and model performance.
+
+\paragraph{Imputation Performance.}
+Across all four benchmark datasets, GGH achieved the highest $\Rsq$ scores with statistical significance ($p < 0.05$, paired $t$-test) against every competitor. The performance gains are particularly striking in high-scarcity regimes (70--97\% missing data), where traditional imputation methods often fail entirely. On the Photocell Degradation dataset with 97\% missing PCBM ratios, GGH achieved $\Rsq = 0.456$ while the best imputation method (Full Info baseline) reached only $\Rsq = 0.174$, and both TabPFN and KNN Imputer achieved negative $\Rsq$ scores. Similarly, on Wine Quality with 97\% missing alcohol content, GGH was the only method to consistently achieve positive $\Rsq$ across all 15 runs.
+
+The soft refinement approach in GGH v2 provides a key advantage over binary selection methods: by assigning continuous weights rather than hard inclusion/exclusion decisions, the algorithm retains useful signal from partially informative hypotheses while downweighting incorrect ones. The weight distribution analysis (Figure~\ref{fig:weight_dist}) confirms that the algorithm successfully assigns higher weights to correct hypotheses across all datasets, with the degree of separation between correct and incorrect weight distributions varying with dataset complexity.
+
+\paragraph{Noise Detection Performance.}
+The DBSCAN-based noise detection pipeline demonstrated high precision across all three datasets tested (94.2--99.4\%), indicating that when GGH identifies a data point as noisy, the identification is almost certainly correct. The recall varies more substantially (24.1--87.0\%), reflecting a conservative detection strategy that prioritizes avoiding false positives over catching all noisy samples. Importantly, even with moderate recall, the filtered models achieved $\Rsq$ scores approaching those trained on clean data alone, suggesting that the most impactful noisy samples (those causing the most model degradation) are preferentially detected.
+
+On the Airfoil dataset, GGH achieved particularly strong noise detection with F1 = 0.906 and accuracy = 93.3\%, recovering 94\% of the clean-data performance ($\Rsq = 0.786$ vs $0.836$). The Photocell dataset showed an interesting pattern: despite low recall (24.1\%), the filtered model slightly exceeded the clean-data baseline ($\Rsq = 0.845$ vs $0.843$), suggesting that the detected samples were particularly harmful outliers whose removal benefited the model.
+
+\paragraph{Architecture and Methodology Contributions.}
+Several design choices in GGH v2 contribute to its effectiveness:
+\begin{itemize}
+    \item The \textit{HypothesisAmplifyingModel} with separate shared and hypothesis pathways ensures strong gradient signal differentiation for hypothesis scoring.
+    \item The four-iteration soft refinement process progressively refines hypothesis weights through unbiased exploration, weighted exploitation, biased rescoring, and loss-based adjustment.
+    \item The enriched gradient vectors ($\gradplus$) incorporating input features and loss values provide richer representations for distinguishing correct from incorrect hypotheses compared to raw gradients alone.
+    \item The cosine similarity scoring against per-class anchor centroids is computationally efficient and interpretable, avoiding the need for complex clustering or classification algorithms during the scoring phase.
+\end{itemize}
+
+\paragraph{Limitations and Future Work.}
+The current implementation focuses on single missing variable scenarios, presenting an opportunity for future work to address multiple simultaneously missing variables. The algorithm was demonstrated using the \textit{HypothesisAmplifyingModel} architecture; we anticipate that with more advanced model architectures, the gradients would capture more informative patterns, further boosting the overall performance. Additionally, implementing automatic hyperparameter tuning techniques such as Bayesian optimization could substantially simplify the deployment of GGH, making it more accessible and effective for different scarcity and data type scenarios. The noise detection component currently relies on DBSCAN, which requires tuning of the $\varepsilon$ and minimum samples hyperparameters; exploring adaptive or parameter-free density-based clustering methods could improve robustness.
+
+% ============================================================================
+% AVAILABILITY
+% ============================================================================
+\section*{Availability of Data and Materials}
+
+Data and code are available at \url{https://github.com/schwallergroup/gradient_guided_hypotheses}.
+
+% ============================================================================
+% ACKNOWLEDGMENTS
+% ============================================================================
+\section*{Acknowledgments}
+
+PS acknowledges support from the NCCR Catalysis (grant number 180544), a National Centre of Competence in Research funded by the Swiss National Science Foundation. During research and development of this work PN and JW worked for Johnson and Johnson Innovative Medicine.
+
+% ============================================================================
+% REFERENCES
+% ============================================================================
+\begin{thebibliography}{99}
+
+\bibitem{thorne2020}
+J. Thorne and A. Vlachos, ``Evidence-based Factual Error Correction,'' \textit{arXiv preprint arXiv:2012.15788}, Dec. 2020.
+
+\bibitem{dakka2021}
+M. A. Dakka \textit{et al.}, ``Automated detection of poor-quality data: case studies in healthcare,'' \textit{Scientific Reports}, vol. 11, no. 1, Dec. 2021. doi: 10.1038/s41598-021-97341-0.
+
+\bibitem{graham2009}
+J. W. Graham, ``Missing data analysis: Making it work in the real world,'' \textit{Annual Review of Psychology}, vol. 60, pp. 549--576, Jan. 2009. doi: 10.1146/annurev.psych.58.110405.085530.
+
+\bibitem{jager2021}
+S. J\"{a}ger, A. Allhorn, and F. Bie{\ss}mann, ``A Benchmark for Data Imputation Methods,'' \textit{Frontiers in Big Data}, vol. 4, Jul. 2021. doi: 10.3389/fdata.2021.693674.
+
+\bibitem{gupta2019}
+S. Gupta and A. Gupta, ``Dealing with noise problem in machine learning data-sets: A systematic review,'' in \textit{Procedia Computer Science}, Elsevier B.V., 2019, pp. 466--474. doi: 10.1016/j.procs.2019.11.146.
+
+\bibitem{northcutt2021}
+C. G. Northcutt, A. Athalye, and J. Mueller, ``Pervasive Label Errors in Test Sets Destabilize Machine Learning Benchmarks,'' \textit{arXiv preprint arXiv:2103.14749}, Mar. 2021.
+
+\bibitem{vanstralen2010}
+K. J. Van Stralen, F. W. Dekker, C. Zoccali, and K. J. Jager, ``Confounding,'' \textit{Nephron -- Clinical Practice}, vol. 116, no. 2, Sep. 2010. doi: 10.1159/000315883.
+
+\bibitem{halperin2015}
+I. Halperin, D. B. Pyne, and D. T. Martin, ``Threats to internal validity in exercise science: A review of overlooked confounding variables,'' \textit{International Journal of Sports Physiology and Performance}, vol. 10, no. 7, pp. 823--829, Oct. 2015. doi: 10.1123/IJSPP.2014-0566.
+
+\bibitem{varian2016}
+H. R. Varian, ``Causal inference in economics and marketing,'' \textit{Proceedings of the National Academy of Sciences}, vol. 113, no. 27, pp. 7310--7315, Jul. 2016. doi: 10.1073/pnas.1510479113.
+
+\bibitem{gamberger2000}
+D. Gamberger, N. Lavrac, and S. Dzeroski, ``Noise detection and elimination in data preprocessing: experiments in medical domains,'' \textit{Applied Artificial Intelligence}, vol. 14, no. 2, pp. 205--223, Feb. 2000. doi: 10.1080/088395100117124.
+
+\bibitem{hulse2007}
+J. D. Hulse, T. M. Khoshgoftaar, and H. Huang, ``The pairwise attribute noise detection algorithm,'' \textit{Knowledge and Information Systems}, vol. 11, no. 2, pp. 171--190, 2007. doi: 10.1007/s10115-006-0022-x.
+
+\bibitem{gupta2019ensemble}
+S. Gupta and A. Gupta, ``Dealing with noise problem in machine learning data-sets: A systematic review,'' in \textit{Procedia Computer Science}, Elsevier B.V., 2019, pp. 466--474. doi: 10.1016/j.procs.2019.11.146.
+
+\bibitem{pelletier2017}
+C. Pelletier, S. Valero, J. Inglada, N. Champion, C. M. Sicre, and G. Dedieu, ``Effect of training class label noise on classification performances for land cover mapping with satellite image time series,'' \textit{Remote Sensing}, vol. 9, no. 2, 2017. doi: 10.3390/rs9020173.
+
+\bibitem{ester1996}
+M. Ester, H.-P. Kriegel, J. Sander, and X. Xu, ``A Density-Based Algorithm for Discovering Clusters in Large Spatial Databases with Noise,'' in \textit{Proceedings of the 2nd International Conference on Knowledge Discovery and Data Mining (KDD)}, 1996.
+
+\bibitem{scholkopf2000}
+B. Sch\"{o}lkopf \textit{et al.}, ``Support Vector Method for Novelty Detection,'' in \textit{Advances in Neural Information Processing Systems}, MIT Press, 2000.
+
+\bibitem{bank2020}
+D. Bank, N. Koenigstein, and R. Giryes, ``Autoencoders,'' \textit{arXiv preprint arXiv:2003.05991}, Mar. 2020.
+
+\bibitem{donders2006}
+A. R. T. Donders, G. J. M. G. van der Heijden, T. Stijnen, and K. G. M. Moons, ``Review: A gentle introduction to imputation of missing values,'' \textit{Journal of Clinical Epidemiology}, vol. 59, no. 10, pp. 1087--1091, Oct. 2006. doi: 10.1016/j.jclinepi.2006.01.014.
+
+\bibitem{pan2023}
+S. Pan and S. Chen, ``Empirical Comparison of Imputation Methods for Multivariate Missing Data in Public Health,'' \textit{International Journal of Environmental Research and Public Health}, vol. 20, no. 2, Jan. 2023. doi: 10.3390/ijerph20021524.
+
+\bibitem{lin2022}
+W. C. Lin, C. F. Tsai, and J. R. Zhong, ``Deep learning for missing value imputation of continuous data and the effect of data discretization,'' \textit{Knowledge-Based Systems}, vol. 239, Mar. 2022. doi: 10.1016/j.knosys.2021.108079.
+
+\bibitem{sun2023}
+Y. Sun, J. Li, Y. Xu, T. Zhang, and X. Wang, ``Deep learning versus conventional methods for missing data imputation: A review and comparative study,'' \textit{Expert Systems with Applications}, vol. 227, Oct. 2023. doi: 10.1016/j.eswa.2023.120201.
+
+\bibitem{jadhav2019}
+A. Jadhav, D. Pramod, and K. Ramanathan, ``Comparison of Performance of Data Imputation Methods for Numeric Dataset,'' \textit{Applied Artificial Intelligence}, vol. 33, no. 10, pp. 913--933, Aug. 2019. doi: 10.1080/08839514.2019.1637138.
+
+\bibitem{stekhoven2012}
+D. J. Stekhoven and P. B\"{u}hlmann, ``Missforest-Non-parametric missing value imputation for mixed-type data,'' \textit{Bioinformatics}, vol. 28, no. 1, pp. 112--118, Jan. 2012. doi: 10.1093/bioinformatics/btr597.
+
+\bibitem{vanbuuren2011}
+S. Van Buuren and K. Groothuis-Oudshoorn, ``mice: Multivariate Imputation by Chained Equations in R,'' \textit{Journal of Statistical Software}, vol. 45, no. 3, 2011.
+
+\bibitem{gondara2017}
+L. Gondara and K. Wang, ``MIDA: Multiple Imputation using Denoising Autoencoders,'' \textit{arXiv preprint arXiv:1705.02737}, May 2017.
+
+\bibitem{lall2020midas}
+R. Lall and T. Robinson, ``The MIDAS Touch: Accurate and Scalable Missing-Data Imputation with Deep Learning,'' \textit{Political Analysis}, vol. 30, no. 2, pp. 179--196, 2022.
+
+\bibitem{jarrett2022}
+D. Jarrett, B. Cebere, T. Liu, A. Curth, and M. van der Schaar, ``HyperImpute: Generalized Iterative Imputation with Automatic Model Selection,'' \textit{arXiv preprint arXiv:2206.07769}, Jun. 2022.
+
+\bibitem{troyanskaya2001}
+O. Troyanskaya \textit{et al.}, ``Missing value estimation methods for DNA microarrays,'' \textit{Bioinformatics}, vol. 17, no. 6, pp. 520--525, 2001.
+
+\bibitem{mazumder2010}
+R. Mazumder, T. Hastie, and R. Tibshirani, ``Spectral Regularization Algorithms for Learning Large Incomplete Matrices,'' \textit{Journal of Machine Learning Research}, vol. 11, pp. 2287--2322, 2010.
+
+\bibitem{hastie2014}
+T. Hastie, R. Mazumder, J. Lee, and R. Zadeh, ``Matrix Completion and Low-Rank SVD via Fast Alternating Least Squares,'' \textit{arXiv preprint arXiv:1410.2596}, Oct. 2014.
+
+\bibitem{koren2009}
+Y. Koren, R. Bell, and C. Volinsky, ``Matrix Factorization Techniques for Recommender Systems,'' \textit{Computer}, vol. 42, no. 8, pp. 30--37, Aug. 2009. doi: 10.1109/MC.2009.263.
+
+\bibitem{pedregosa2011}
+F. Pedregosa \textit{et al.}, ``Scikit-learn: Machine Learning in Python,'' \textit{Journal of Machine Learning Research}, vol. 12, pp. 2825--2830, 2011.
+
+\bibitem{rubinsteyn}
+A. Rubinsteyn and S. Feldman, ``fancyimpute: version 0.7.0,'' \url{https://github.com/iskandr/fancyimpute}.
+
+\bibitem{lall2023}
+R. Lall and T. Robinson, ``Efficient Multiple Imputation for Diverse Data in Python and R: MIDASpy and rMIDAS,'' \textit{Journal of Statistical Software}, vol. 107, no. 9, 2023. doi: 10.18637/jss.v107.i09.
+
+\bibitem{schwaller2021}
+P. Schwaller, A. C. Vaucher, T. Laino, and J.-L. Reymond, ``Prediction of chemical reaction yields using deep learning,'' \textit{Machine Learning: Science and Technology}, vol. 2, no. 1, p. 015016, Mar. 2021. doi: 10.1088/2632-2153/abc81d.
+
+\bibitem{langner2020}
+S. Langner \textit{et al.}, ``Beyond Ternary OPV: High-Throughput Experimentation and Self-Driving Laboratories Optimize Multicomponent Systems,'' \textit{Advanced Materials}, vol. 32, no. 14, Apr. 2020. doi: 10.1002/adma.201907801.
+
+\bibitem{dreher2021}
+S. D. Dreher and S. W. Krska, ``Chemistry Informer Libraries: Conception, Early Experience, and Role in the Future of Cheminformatics,'' \textit{Accounts of Chemical Research}, vol. 54, no. 7, pp. 1586--1596, Apr. 2021. doi: 10.1021/acs.accounts.0c00760.
+
+\bibitem{neves2023}
+P. Neves \textit{et al.}, ``Global reactivity models are impactful in industrial synthesis applications,'' \textit{Journal of Cheminformatics}, vol. 15, no. 1, Dec. 2023. doi: 10.1186/s13321-023-00685-0.
+
+\bibitem{hollmann2023}
+N. Hollmann, S. M\"{u}ller, K. Eggensperger, and F. Hutter, ``TabPFN: A Transformer That Solves Small Tabular Classification Problems in a Second,'' in \textit{Proceedings of the International Conference on Learning Representations (ICLR)}, 2023.
+
+\end{thebibliography}
+
+\end{document}

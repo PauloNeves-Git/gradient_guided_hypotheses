@@ -144,11 +144,12 @@ class TrainValidationManager():
                             grads = compute_individual_grads(model, individual_losses, DO.device)
                             if AM.save_results:
                                 DO.append2hyp_df(batch_i, grads, "gradients", layer = AM.layer)
-                            DO.append2hyp_df(batch_i, ind_loss_array, "loss") 
+                            DO.append2hyp_df(batch_i, ind_loss_array, "loss")
                             # select gradients by avoiding noisy datapoints
                             sel_grads, sel_global_ids = gradient_selection_avoid_noise(AM, epoch, grads, self.batch_size, batch_i, inputs,
-                                                                                       predictions, individual_losses) 
-                            
+                                                                                       predictions, individual_losses)
+                            confidence_weights = None
+
                             if epoch >= self.num_epochs - self.end_epochs_noise_detection:
                                 sel_grads = grads
                                 if first_load == True:

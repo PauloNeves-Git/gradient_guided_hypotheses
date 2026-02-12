@@ -16,10 +16,27 @@ from copy import deepcopy
 from sklearn.cluster import DBSCAN
 
 from GGH.data_ops import DataOperator
-from GGH.selection_algorithms import AlgoModulators
+from GGH.selection_algorithms import AlgoModulators, compute_individual_grads, MSEIndividualLosses
 from GGH.models import initialize_model
 from GGH.train_val_loop import TrainValidationManager
 from GGH.inspector import get_gradarrays_n_labels
+
+
+def _ensure_noise_detection_compat(DO):
+    """Ensure DataOperator is compatible with noise detection.
+
+    When miss_vars=[] (e.g., noise detection), DataOperator skips hypothesis
+    processing and never sets num_hyp_comb. AlgoModulators requires it, so
+    we default to 1.
+
+    Also forces regression mode since noise detection always predicts a
+    continuous target. Without this, datasets with few unique target values
+    (e.g., Wine Quality with integer scores 3-8) get misclassified as
+    multi-class by determine_problem_type, causing the MLP to use softmax.
+    """
+    if not hasattr(DO, 'num_hyp_comb'):
+        DO.num_hyp_comb = 1
+    DO.problem_type = 'regression'
 
 
 class SimpleNoiseDetectionModel(nn.Module):
@@ -134,10 +151,12 @@ def train_on_cleaned_data(DO, df_train_cleaned, r_state, data_path, inpt_vars,
         tuple: (DO_clean, TVM, AM, model)
     """
     use_info = "full info"
+    _ensure_noise_detection_compat(DO)
     AM = AlgoModulators(DO, lr=lr)
     DO_clean = DataOperator(data_path, inpt_vars, target_vars, miss_vars, hypothesis,
                             partial_perc, r_state, pre_defined_train=df_train_cleaned,
                             device="cpu")
+    _ensure_noise_detection_compat(DO_clean)
     dataloader = DO_clean.prep_dataloader(use_info, batch_size)
     model = initialize_model(DO_clean, dataloader, hidden_size, r_state, dropout=dropout)
     TVM = TrainValidationManager(use_info, num_epochs, dataloader, batch_size, r_state,
@@ -188,6 +207,7 @@ def run_full_info(DO_clean, r_state, batch_size, hidden_size, lr, num_epochs,
         dict: {'test_r2', 'test_mse', 'test_mae'}
     """
     set_to_deterministic(r_state)
+    _ensure_noise_detection_compat(DO_clean)
     AM = AlgoModulators(DO_clean, lr=lr)
     dataloader = DO_clean.prep_dataloader("full info", batch_size)
     model = initialize_model(DO_clean, dataloader, hidden_size, r_state, dropout=dropout)
@@ -218,6 +238,7 @@ def run_full_info_noisy(DO, r_state, batch_size, hidden_size, lr, num_epochs,
         dict: {'test_r2', 'test_mse', 'test_mae'}
     """
     set_to_deterministic(r_state)
+    _ensure_noise_detection_compat(DO)
     AM = AlgoModulators(DO, lr=lr)
     dataloader = DO.prep_dataloader("full info noisy", batch_size)
     model = initialize_model(DO, dataloader, hidden_size, r_state, dropout=dropout)
@@ -241,7 +262,7 @@ def run_old_ggh_dbscan(DO, r_state, config):
     5. Retrain on cleaned data
 
     Args:
-        DO: DataOperator with noise simulated
+        DO: DataOperator with noise simulated (used for test evaluation)
         r_state: Random state
         config: Dictionary with keys:
             - data_path, inpt_vars, target_vars, miss_vars, hypothesis, partial_perc
@@ -249,12 +270,18 @@ def run_old_ggh_dbscan(DO, r_state, config):
             - old_ggh_epochs, old_ggh_end_epochs
             - old_ggh_eps_values, old_ggh_min_samples_ratios
             - final_epochs
+            - noise_perc, noise_min, noise_max (noise simulation parameters)
 
     Returns:
         dict: {'test_r2', 'test_mse', 'test_mae', 'detection', 'n_detected', 'eps', 'min_samples_ratio'}
     """
-    use_info = "full info noisy"
+    # Must use "known info noisy simulation" — the training loop only stores
+    # per-sample gradients to DO.df_train_noisy under this use_info value.
+    use_info = "known info noisy simulation"
     num_epochs = config['old_ggh_epochs'] + config['old_ggh_end_epochs']
+    noise_perc = config['noise_perc']
+    noise_min = config['noise_min']
+    noise_max = config['noise_max']
 
     best_result = None
     best_val_error = np.inf
@@ -263,8 +290,18 @@ def run_old_ggh_dbscan(DO, r_state, config):
         for min_samples_ratio in config['old_ggh_min_samples_ratios']:
             set_to_deterministic(r_state)
 
+            # Re-create DO each iteration — training appends gradients to
+            # df_train_noisy in place, so we need a fresh copy each time.
+            DO = DataOperator(config['data_path'], config['inpt_vars'],
+                              config['target_vars'], config['miss_vars'],
+                              config['hypothesis'], config['partial_perc'],
+                              r_state, device="cpu", use_case="noise detection")
+            DO.simulate_noise(noise_perc, noise_min, noise_max)
+            _ensure_noise_detection_compat(DO)
+
             AM = AlgoModulators(DO, lr=config['lr'], eps_value=eps,
-                                min_samples_ratio=min_samples_ratio)
+                                min_samples_ratio=min_samples_ratio,
+                                save_results=True)
             dataloader = DO.prep_dataloader(use_info, config['batch_size'])
             model = initialize_model(DO, dataloader, config['hidden_size'],
                                      r_state, dropout=config['dropout'])
@@ -273,9 +310,9 @@ def run_old_ggh_dbscan(DO, r_state, config):
                 use_info, num_epochs, dataloader, config['batch_size'], r_state,
                 ".", select_gradients=True,
                 end_epochs_noise_detection=config['old_ggh_end_epochs'],
-                best_valid_error=np.inf, final_analysis=False
+                best_valid_error=np.inf, final_analysis=True
             )
-            TVM.train_model(DO, AM, model, final_analysis=False)
+            TVM.train_model(DO, AM, model, final_analysis=True)
 
             # Extract gradients
             array_grads_context, do_hyp_class = get_gradarrays_n_labels(
@@ -294,6 +331,128 @@ def run_old_ggh_dbscan(DO, r_state, config):
             detected_noisy_indices = [i for i, label in enumerate(pred_labels) if label == 1]
 
             # Remove detected noisy and retrain
+            DO.df_train_noisy["noise_detected"] = pred_labels
+            df_cleaned = deepcopy(DO.df_train_noisy[DO.df_train_noisy["noise_detected"] == 0])
+
+            DO_clean, TVM_clean, AM_clean, model_clean = train_on_cleaned_data(
+                DO, df_cleaned, r_state, config['data_path'], config['inpt_vars'],
+                config['target_vars'], config['miss_vars'], config['hypothesis'],
+                config['partial_perc'], config['batch_size'], config['hidden_size'],
+                config['lr'], config['final_epochs'], config['dropout']
+            )
+
+            if TVM_clean.best_valid_error < best_val_error:
+                best_val_error = TVM_clean.best_valid_error
+
+                true_noisy_indices = DO.df_train_noisy[
+                    DO.df_train_noisy['noise_added'] == 1
+                ].index.tolist()
+                detection_metrics = evaluate_detection(
+                    detected_noisy_indices, true_noisy_indices, len(DO.df_train_noisy)
+                )
+
+                r2, mse, mae = evaluate_on_test(DO, model_clean)
+                best_result = {
+                    'eps': eps,
+                    'min_samples_ratio': min_samples_ratio,
+                    'test_r2': r2,
+                    'test_mse': mse,
+                    'test_mae': mae,
+                    'detection': detection_metrics,
+                    'n_detected': len(detected_noisy_indices),
+                }
+
+    return best_result
+
+
+def run_old_ggh_dbscan_fast(DO_original, r_state, config):
+    """Fast Old GGH noise detection: Adam training + single gradient extraction + DBSCAN.
+
+    Unlike run_old_ggh_dbscan (which computes per-sample gradients every epoch),
+    this variant trains normally with Adam, then computes gradients ONCE on the
+    best model for DBSCAN clustering.
+
+    Pipeline:
+    1. Train normally with Adam on noisy data (no gradient selection)
+    2. Load best model, compute per-sample gradients once
+    3. DBSCAN clustering on gradients - outliers flagged as noisy
+    4. Grid search over eps and min_samples
+    5. Retrain on cleaned data
+
+    Args:
+        DO_original: DataOperator with noise simulated (used for test evaluation)
+        r_state: Random state
+        config: Same config dict as run_old_ggh_dbscan
+
+    Returns:
+        dict: {'test_r2', 'test_mse', 'test_mae', 'detection', 'n_detected', 'eps', 'min_samples_ratio'}
+    """
+    num_epochs = config['old_ggh_epochs'] + config['old_ggh_end_epochs']
+    noise_perc = config['noise_perc']
+    noise_min = config['noise_min']
+    noise_max = config['noise_max']
+
+    best_result = None
+    best_val_error = np.inf
+
+    for eps in config['old_ggh_eps_values']:
+        for min_samples_ratio in config['old_ggh_min_samples_ratios']:
+            set_to_deterministic(r_state)
+
+            # Fresh DO for each combo (gradient storage modifies df in place)
+            DO = DataOperator(config['data_path'], config['inpt_vars'],
+                              config['target_vars'], config['miss_vars'],
+                              config['hypothesis'], config['partial_perc'],
+                              r_state, device="cpu", use_case="noise detection")
+            DO.simulate_noise(noise_perc, noise_min, noise_max)
+            _ensure_noise_detection_compat(DO)
+
+            AM = AlgoModulators(DO, lr=config['lr'], eps_value=eps,
+                                min_samples_ratio=min_samples_ratio)
+
+            # --- Phase 1: Train normally with Adam on noisy data ---
+            dataloader = DO.prep_dataloader("full info noisy", config['batch_size'])
+            model = initialize_model(DO, dataloader, config['hidden_size'],
+                                     r_state, dropout=config['dropout'])
+            TVM = TrainValidationManager(
+                "full info noisy", num_epochs, dataloader, config['batch_size'],
+                r_state, ".", select_gradients=False, final_analysis=True
+            )
+            TVM.train_model(DO, AM, model, final_analysis=True)
+
+            # --- Phase 2: Compute gradients ONCE on best model ---
+            model = initialize_model(DO, dataloader, config['hidden_size'],
+                                     r_state, dropout=config['dropout'])
+            model.load_state_dict(torch.load(TVM.weights_save_path))
+            model.eval()
+
+            loss_fn = MSEIndividualLosses()
+            for batch_i, (inputs, labels) in enumerate(dataloader):
+                labels = labels.view(-1, 1)
+                predictions = model(inputs)
+                _, individual_losses = loss_fn(predictions, labels)
+                grads = compute_individual_grads(model, individual_losses, "cpu")
+                DO.append2hyp_df(batch_i, grads, "gradients", layer=AM.layer)
+                ind_loss_array = individual_losses.detach().numpy()
+                DO.append2hyp_df(batch_i, ind_loss_array, "loss")
+
+            # --- Phase 3: DBSCAN on stored gradients ---
+            array_grads_context, do_hyp_class = get_gradarrays_n_labels(
+                DO, 0, layer=-2, remov_avg=False, include_context=False,
+                normalize_grads_context=False, loss_in_context=True,
+                only_loss_context=True,
+                num_batches=math.ceil(len(DO.df_train_noisy) / config['batch_size']),
+                epoch=0,  # Only one epoch of gradients stored
+                use_case="noise_detection"
+            )
+
+            dbscan = DBSCAN(eps=eps, min_samples=int(config['batch_size'] * min_samples_ratio))
+            pred_labels = dbscan.fit_predict(array_grads_context)
+            pred_labels = pred_labels * -1  # Invert: 1=noisy (outliers), 0=clean
+
+            detected_noisy_indices = [i for i, label in enumerate(pred_labels) if label == 1]
+
+            # --- Phase 4: Remove detected noisy and retrain from scratch ---
             DO.df_train_noisy["noise_detected"] = pred_labels
             df_cleaned = deepcopy(DO.df_train_noisy[DO.df_train_noisy["noise_detected"] == 0])
 

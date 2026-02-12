@@ -20,6 +20,11 @@ from .benchmark_viz import (
     plot_mse_comparison,
     plot_mae_comparison,
     plot_all_metrics,
+    save_benchmark_results,
+    load_benchmark_results,
+    save_noise_detection_results,
+    load_noise_detection_results,
+    plot_weight_distributions,
 )
 from .noise_detection import (
     SimpleNoiseDetectionModel,
@@ -28,6 +33,7 @@ from .noise_detection import (
     run_full_info,
     run_full_info_noisy,
     run_old_ggh_dbscan,
+    run_old_ggh_dbscan_fast,
     run_new_ggh_unsupervised,
 )
 from .noise_detection_viz import (
@@ -58,11 +64,16 @@ __all__ = [
     'train_ggh_model',
     'train_full_info_model',
     'train_partial_model',
-    # Benchmark visualization
+    # Benchmark visualization & persistence
     'plot_r2_comparison',
     'plot_mse_comparison',
     'plot_mae_comparison',
     'plot_all_metrics',
+    'save_benchmark_results',
+    'load_benchmark_results',
+    'save_noise_detection_results',
+    'load_noise_detection_results',
+    'plot_weight_distributions',
     # Noise detection utilities
     'SimpleNoiseDetectionModel',
     'evaluate_detection',
@@ -70,6 +81,7 @@ __all__ = [
     'run_full_info',
     'run_full_info_noisy',
     'run_old_ggh_dbscan',
+    'run_old_ggh_dbscan_fast',
     'run_new_ggh_unsupervised',
     # Noise detection visualization
     'plot_noise_detection_r2',
