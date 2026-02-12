@@ -60,11 +60,11 @@ Experimental validation of GGH is conducted using four real-world open-source da
 % ============================================================================
 \section{Introduction}
 
-Capturing and representing the real world through numerical vector representations presents multiple complex challenges. Two of the most critical are missing data and the inaccuracy of the data collected, a phenomenon well-documented in the literature \cite{thorne2020, dakka2021, graham2009, jager2021}.
+Capturing and representing the real world through numerical vector representations presents multiple complex challenges. Two of the most critical are missing data and the inaccuracy of the data collected, a phenomenon well-documented in the literature \cite{thorne2020,dakka2021,graham2009,jager2021}.
 
 Inaccurate or noisy data is a widely recognized problem in data-driven methodologies, often leading to a degradation in model performance \cite{gupta2019}. Even high performance on standard benchmarks, such as the ImageNet validation set, may not accurately reflect a model's effectiveness in real-world scenarios, as highlighted by Northcutt et al.\ \cite{northcutt2021}.
 
-The challenge of missing data can be subdivided into two primary forms: a variable can be partially missing, or completely omitted from a dataset. If the latter has a causal link to the dependent variable, it is denominated as a confounding variable. Identifying and addressing the impact of such variables is crucial across various domains, from health research \cite{vanstralen2010, halperin2015} to economics \cite{varian2016}. If data is accurately captured without missing values, the residual ``noise'' can be attributed to the influence of confounding variables. Therefore, distinguishing between data instances whose outcome is fully explained by the recorded variables and those that are not, may offer a unified solution to the challenges of missing and inaccurate data.
+The challenge of missing data can be subdivided into two primary forms: a variable can be partially missing, or completely omitted from a dataset. If the latter has a causal link to the dependent variable, it is denominated as a confounding variable. Identifying and addressing the impact of such variables is crucial across various domains, from health research \cite{vanstralen2010,halperin2015} to economics \cite{varian2016}. If data is accurately captured without missing values, the residual ``noise'' can be attributed to the influence of confounding variables. Therefore, distinguishing between data instances whose outcome is fully explained by the recorded variables and those that are not, may offer a unified solution to the challenges of missing and inaccurate data.
 
 The objective of this publication is twofold: to introduce a novel technique to tackle the dual issues of missing and inaccurate data, and to inspire a new paradigm. In this paradigm, low-cost data production efforts could target confounding variables to scarcely populate the training data, which combined with GGH would enable models to achieve some understanding of the confounding dynamics.
 
@@ -106,7 +106,7 @@ Given the wide array of performance results obtained from each method depending 
 
     \item \textbf{MICE} \cite{vanbuuren2011}: Multivariate Imputation by Chained Equations is a technique that uses a multiple imputation approach. Much like ensemble methods in noise detection, predicting multiple imputations can reduce the risk of biased estimates and be used to calculate uncertainty.
 
-    \item \textbf{MIDAS} \cite{gondara2017, lall2020midas}: Multiple Imputation using Denoising Autoencoders, a deep learning approach where autoencoders are trained multiple times to reconstruct the dataset from different partially corrupted versions; the final imputed values are an average of the imputations made by each of the autoencoders.
+    \item \textbf{MIDAS} \cite{gondara2017,lall2020midas}: Multiple Imputation using Denoising Autoencoders, a deep learning approach where autoencoders are trained multiple times to reconstruct the dataset from different partially corrupted versions; the final imputed values are an average of the imputations made by each of the autoencoders.
 
     \item \textbf{HyperImpute} \cite{jarrett2022}: A recent state-of-the-art method that applies a generalized iterative imputation approach with an automatic model selection mechanism, enabling the method to adaptively select the most appropriate models for each feature based on the dataset's specific characteristics.
 
@@ -114,7 +114,7 @@ Given the wide array of performance results obtained from each method depending 
 
     \item \textbf{Weighted K-Nearest Neighbours (kNN)} \cite{troyanskaya2001}: A ``locally grounded'' method, meaning each imputation depends only on the respective neighbors, making it more appropriate than global imputation methods for datasets with strong local patterns.
 
-    \item \textbf{SoftImpute} \cite{mazumder2010, hastie2014}: An algorithm where the user defines a soft-threshold $\lambda$ and applies singular value decomposition (SVD) to the observed entries of the matrix with missing data; values from the low-rank representation are then used to fill in the original matrix iteratively.
+    \item \textbf{SoftImpute} \cite{mazumder2010,hastie2014}: An algorithm where the user defines a soft-threshold $\lambda$ and applies singular value decomposition (SVD) to the observed entries of the matrix with missing data; values from the low-rank representation are then used to fill in the original matrix iteratively.
 
     \item \textbf{Matrix Factorization} \cite{koren2009}: Originally prevalent as an algorithm for recommender systems, this method works by using stochastic gradient descent (SGD) to decompose a matrix with missing values into two lower-dimensional matrices that, when multiplied, approximate the original matrix.
 
@@ -253,31 +253,13 @@ We denominate the instances that generated the $\gradplus$ in Figure~\ref{fig:ts
 
 The distribution of $\gradplus$ will depend on the data, model architecture, parameter initialization, hypothesis class and will change with each weight update. While Figure~\ref{fig:tsne_incorrect} and Figure~\ref{fig:tsne_correct} are useful to analyze how the $\gradplus$ are behaving, an illustration that combines the quality of the enriched gradient generation with the scoring quality is also valuable.
 
-In the GGH v2 soft refinement, rather than binary selection probabilities, each hypothesis receives a continuous weight between $w_{\min}$ and 1.0. Figure~\ref{fig:weight_dist} presents the weight distributions for correct and incorrect hypotheses across representative datasets. In an ideal scenario, correct hypotheses would cluster near weight 1.0, while incorrect hypotheses would cluster near $w_{\min}$. The separation between these two distributions indicates the algorithm's ability to distinguish correct from incorrect hypotheses. The weight distributions also include known partial correct data, which enters the final training at weight 1.0 regardless of the scoring outcome.
+In the GGH v2 soft refinement, rather than binary selection probabilities, each hypothesis receives a continuous weight between $w_{\min}$ and 1.0. Figure~\ref{fig:weight_dist} presents the weight distributions for correct and incorrect hypotheses on the Wine Quality dataset as a representative example. In an ideal scenario, correct hypotheses would cluster near weight 1.0, while incorrect hypotheses would cluster near $w_{\min}$. The separation between these two distributions indicates the algorithm's ability to distinguish correct from incorrect hypotheses. The weight distributions also include known partial correct data, which enters the final training at weight 1.0 regardless of the scoring outcome.
 
 % Weight distribution figure
 \begin{figure}[htbp]
     \centering
-    \begin{subfigure}[b]{0.48\textwidth}
-        \includegraphics[width=\textwidth]{figures/photocell_weight_distributions.png}
-        \caption{Photocell Degradation}
-    \end{subfigure}
-    \hfill
-    \begin{subfigure}[b]{0.48\textwidth}
-        \includegraphics[width=\textwidth]{figures/airfoil_weight_distributions.png}
-        \caption{Airfoil Self-Noise}
-    \end{subfigure}
-    \\[0.5em]
-    \begin{subfigure}[b]{0.48\textwidth}
-        \includegraphics[width=\textwidth]{figures/photoredox_weight_distributions.png}
-        \caption{Photoredox Yield}
-    \end{subfigure}
-    \hfill
-    \begin{subfigure}[b]{0.48\textwidth}
-        \includegraphics[width=\textwidth]{figures/wine_weight_distributions.png}
-        \caption{Wine Quality}
-    \end{subfigure}
-    \caption{Weight distributions for correct (green) and incorrect (red) hypotheses after the four-iteration soft refinement process across all four benchmark datasets. The distributions show how GGH assigns higher weights to correct hypotheses and lower weights to incorrect ones. Partial correct data (known ground truth) enters at weight 1.0.}
+    \includegraphics[width=0.7\textwidth]{figures/wine_weight_distributions.png}
+    \caption{Weight distributions for correct (green) and incorrect (red) hypotheses after the four-iteration soft refinement process on the Wine Quality dataset. The distributions show how GGH assigns higher weights to correct hypotheses and lower weights to incorrect ones. Partial correct data (known ground truth) enters at weight 1.0.}
     \label{fig:weight_dist}
 \end{figure}
 
@@ -344,12 +326,12 @@ When simulating a scenario with such a high ratio of missing data, we observe th
 
 In this scenario with very high ratios of missing data GGH represents the only viable solution, showing a large improvement over the state of the art. Such scenarios are not implausible; in fact, these could be manufactured as a novel approach to tackle unrecorded variables, because the data requirements are so low, small data production efforts could be executed to attain a few records on the unrecorded or highly missing variable.
 
-% Photocell R2 boxplot
+% Photocell combined MSE + R2
 \begin{figure}[htbp]
     \centering
-    \includegraphics[width=0.7\textwidth]{figures/photocell_r2_boxplot.png}
-    \caption{$\Rsq$ score distribution across 15 runs for the Photocell Degradation imputation benchmark. GGH achieves a median $\Rsq$ substantially higher than all competitors.}
-    \label{fig:photocell_r2_boxplot}
+    \includegraphics[width=0.85\textwidth]{figures/photocell_combined_mse_r2.png}
+    \caption{Mean Squared Error distribution (boxplots) and $\Rsq$ scores (line) across 15 runs for the Photocell Degradation imputation benchmark. GGH achieves the lowest MSE and highest $\Rsq$ among all competitors.}
+    \label{fig:photocell_combined}
 \end{figure}
 
 \subsection{Photoredox Yield Estimation}
@@ -377,12 +359,12 @@ To simulate such a scenario, we mask 70\% of the molecular ratios for the photoc
     \end{tabular}
 \end{table}
 
-% Photoredox R2 boxplot
+% Photoredox combined MSE + R2
 \begin{figure}[htbp]
     \centering
-    \includegraphics[width=0.7\textwidth]{figures/photoredox_r2_boxplot.png}
-    \caption{$\Rsq$ score distribution across 15 runs for the Photoredox Yield imputation benchmark.}
-    \label{fig:photoredox_r2_boxplot}
+    \includegraphics[width=0.85\textwidth]{figures/photoredox_combined_mse_r2.png}
+    \caption{Mean Squared Error distribution (boxplots) and $\Rsq$ scores (line) across 15 runs for the Photoredox Yield imputation benchmark.}
+    \label{fig:photoredox_combined}
 \end{figure}
 
 \subsection{Airfoil Self-Noise}
@@ -411,12 +393,12 @@ For this dataset 96\% of an important variable, chord length, was simulated to b
     \end{tabular}
 \end{table}
 
-% Airfoil R2 boxplot
+% Airfoil combined MSE + R2
 \begin{figure}[htbp]
     \centering
-    \includegraphics[width=0.7\textwidth]{figures/airfoil_r2_boxplot.png}
-    \caption{$\Rsq$ score distribution across 15 runs for the Airfoil Self-Noise imputation benchmark.}
-    \label{fig:airfoil_r2_boxplot}
+    \includegraphics[width=0.85\textwidth]{figures/airfoil_combined_mse_r2.png}
+    \caption{Mean Squared Error distribution (boxplots) and $\Rsq$ scores (line) across 15 runs for the Airfoil Self-Noise imputation benchmark.}
+    \label{fig:airfoil_combined}
 \end{figure}
 
 \subsection{Wine Quality}
@@ -445,12 +427,12 @@ For this dataset, 97\% of the alcohol content variable was simulated to be missi
     \end{tabular}
 \end{table}
 
-% Wine R2 boxplot
+% Wine combined MSE + R2
 \begin{figure}[htbp]
     \centering
-    \includegraphics[width=0.7\textwidth]{figures/wine_r2_boxplot.png}
-    \caption{$\Rsq$ score distribution across 15 runs for the Wine Quality imputation benchmark. GGH is the only method that consistently achieves positive $\Rsq$ across all runs.}
-    \label{fig:wine_r2_boxplot}
+    \includegraphics[width=0.85\textwidth]{figures/wine_combined_mse_r2.png}
+    \caption{Mean Squared Error distribution (boxplots) and $\Rsq$ scores (line) across 15 runs for the Wine Quality imputation benchmark. GGH is the only method that consistently achieves positive $\Rsq$ across all runs.}
+    \label{fig:wine_combined}
 \end{figure}
 
 \subsection{Noise Detection}

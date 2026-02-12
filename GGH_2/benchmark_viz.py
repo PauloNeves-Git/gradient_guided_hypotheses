@@ -382,6 +382,121 @@ def plot_all_metrics(results_r2, results_mse, results_mae, dataset_name, results
     plot_mae_comparison(results_mae, dataset_name, results_path, plot_type)
 
 
+def plot_combined_mse_r2(results_mse, results_r2, dataset_name, results_path):
+    """Plot MSE boxplots with R² scores overlayed as a line on a secondary axis.
+
+    Creates a single professional figure combining MSE distribution (boxplots)
+    with mean R² scores (line + markers) on a dual y-axis layout.
+
+    Args:
+        results_mse: Dictionary mapping method name -> list of MSE values
+        results_r2: Dictionary mapping method name -> list of R² scores
+        dataset_name: Name of dataset for title (e.g., "Wine Quality")
+        results_path: Directory path to save the plot
+    """
+    # Sort methods by median MSE (ascending = best first)
+    methods, mse_data = _sort_methods(results_mse, descending=False)
+    r2_data = [results_r2[m] for m in methods]
+    n_methods = len(methods)
+
+    # Color palette
+    viridis_colors = [cm.viridis(i) for i in np.linspace(0.15, 0.85, n_methods)]
+    r2_color = '#21536B'  # dark teal-blue from viridis range
+
+    fig, ax1 = plt.subplots(figsize=(12, 6))
+
+    # --- MSE Boxplots (primary axis) ---
+    bp = ax1.boxplot(
+        mse_data, patch_artist=True, widths=0.55,
+        medianprops=dict(color='black', linewidth=1.8),
+        whiskerprops=dict(color='#555555', linewidth=1.2),
+        capprops=dict(color='#555555', linewidth=1.2),
+        flierprops=dict(marker='o', markerfacecolor='#999999',
+                        markersize=4, alpha=0.5, markeredgecolor='none'),
+    )
+    for patch, color in zip(bp['boxes'], viridis_colors):
+        patch.set_facecolor(color)
+        patch.set_edgecolor('#333333')
+        patch.set_linewidth(1.2)
+        patch.set_alpha(0.82)
+
+    ax1.set_ylabel('Mean Squared Error', fontsize=12, color='#333333')
+    ax1.tick_params(axis='y', labelcolor='#333333')
+
+    # Median labels on boxplots (hovering just above the median line)
+    for i, d in enumerate(mse_data):
+        median = np.median(d)
+        ax1.annotate(f'{median:.4f}', xy=(i + 1, median),
+                     xytext=(0, 6), textcoords='offset points',
+                     ha='center', va='bottom',
+                     fontsize=8, fontweight='bold', color='#333333',
+                     bbox=dict(boxstyle='round,pad=0.15', facecolor='white',
+                               edgecolor='none', alpha=0.7))
+
+    # --- R² Line (secondary axis) ---
+    ax2 = ax1.twinx()
+    r2_means = [np.mean(d) for d in r2_data]
+    r2_stds = [np.std(d) for d in r2_data]
+    x_positions = list(range(1, n_methods + 1))
+
+    ax2.errorbar(
+        x_positions, r2_means, yerr=r2_stds,
+        color=r2_color, linewidth=2.2, marker='D', markersize=7,
+        markerfacecolor='white', markeredgecolor=r2_color, markeredgewidth=2,
+        capsize=0, elinewidth=1.0, ecolor='#21536B40', zorder=5,
+        label='R\u00b2 Score',
+    )
+
+    # R² value labels
+    for i, (mean, std) in enumerate(zip(r2_means, r2_stds)):
+        ax2.annotate(
+            f'{mean:.3f}', xy=(x_positions[i], mean),
+            xytext=(0, 12), textcoords='offset points',
+            ha='center', va='bottom', fontsize=9, fontweight='bold',
+            color=r2_color,
+            bbox=dict(boxstyle='round,pad=0.2', facecolor='white',
+                      edgecolor=r2_color, alpha=0.85, linewidth=0.8),
+        )
+
+    # Expand R² axis to ensure annotations stay within bounds
+    r2_max = max(m + s for m, s in zip(r2_means, r2_stds))
+    r2_min = min(m - s for m, s in zip(r2_means, r2_stds))
+    r2_range = r2_max - r2_min if r2_max > r2_min else 0.1
+    ax2.set_ylim(r2_min - 0.15 * r2_range, r2_max + 0.20 * r2_range)
+
+    ax2.set_ylabel('R\u00b2 Score', fontsize=12, color=r2_color)
+    ax2.tick_params(axis='y', labelcolor=r2_color)
+
+    # --- Shared formatting ---
+    ax1.set_xticks(range(1, n_methods + 1))
+    ax1.set_xticklabels(methods, rotation=35, ha='right', fontsize=10)
+    ax1.set_title(f'{dataset_name}: Mean Squared Error Distribution & R\u00b2 Performance',
+                  fontsize=14, fontweight='bold', pad=15)
+    ax1.grid(axis='y', alpha=0.2, linestyle='--')
+    ax1.set_axisbelow(True)
+
+    # Legend combining both axes
+    from matplotlib.lines import Line2D
+    box_patch = Rectangle((0, 0), 1, 1, facecolor=viridis_colors[0],
+                           edgecolor='#333333', linewidth=1.2, alpha=0.82)
+    r2_line = Line2D([0], [0], color=r2_color, linewidth=2.2, marker='D',
+                     markersize=7, markerfacecolor='white',
+                     markeredgecolor=r2_color, markeredgewidth=2)
+    ax1.legend([box_patch, r2_line], ['Mean Squared Error', 'R\u00b2 Score'],
+               loc='upper right', fontsize=10, framealpha=0.9)
+
+    fig.tight_layout()
+
+    date_str = datetime.now().strftime('%Y-%m-%d')
+    dataset_safe = dataset_name.replace(' ', '_')
+    save_path = f'{results_path}/{dataset_safe}_combined_mse_r2_{date_str}.png'
+    plt.savefig(save_path, dpi=600, bbox_inches='tight')
+    plt.show()
+
+    print(f"Plot saved to: {save_path}")
+    return save_path
+
+
 def plot_weight_distributions(gid_weights, DO, dataset_name='', results_path=None,
                               bins=20, hist_alpha=0.3, kde=True):
     """Plot GGH V2 soft weight distributions for correct vs incorrect hypotheses.
